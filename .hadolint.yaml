@@ -1,0 +1,3 @@
+# Info-level findings (e.g. DL3066: named non-root user vs numeric UID)
+# are informational style preferences here, not build-breaking issues.
+failure-threshold: warning

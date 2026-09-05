@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-service-config
+  namespace: taskflow
+  labels:
+    app.kubernetes.io/name: task-service
+    app.kubernetes.io/part-of: taskflow
+data:
+  LOG_LEVEL: "info"

@@ -1,0 +1,57 @@
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+*credentials*
+secrets/
+!**/secret.example.yaml
+
+# --- Kubernetes / kubeconfig ---
+kubeconfig*
+*.kubeconfig
+
+# --- Terraform (reserved for later phases) ---
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+services/**/dist/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Docker ---
+*.pid
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Misc generated ---
+*.log
+coverage/
+.coverage
+htmlcov/
+dist/
+build/

@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-taskflow}
+      POSTGRES_USER: ${POSTGRES_USER:-taskflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme-local-only}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskflow} -d ${POSTGRES_DB:-taskflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - taskflow
+
+  task-service:
+    build:
+      context: ./services/task-service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://taskflow:changeme-local-only@postgres:5432/taskflow}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${TASK_SERVICE_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - taskflow
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    restart: unless-stopped
+    environment:
+      API_GATEWAY_PORT: 8080
+      TASK_SERVICE_URL: http://task-service:8000
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      - task-service
+    networks:
+      - taskflow
+
+networks:
+  taskflow:
+    driver: bridge
+
+volumes:
+  postgres-data:

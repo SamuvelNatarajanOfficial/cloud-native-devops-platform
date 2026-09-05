@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-api-gateway:
+    name: Test api-gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api-gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: services/api-gateway/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  test-task-service:
+    name: Test task-service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/task-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/task-service/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  lint-dockerfiles:
+    name: Lint Dockerfiles (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/api-gateway/Dockerfile
+          config: .hadolint.yaml
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/task-service/Dockerfile
+          config: .hadolint.yaml
+
+  secret-scan:
+    name: Scan for committed secrets (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-images:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    needs: [test-api-gateway, test-task-service, lint-dockerfiles]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build api-gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/api-gateway
+          push: false
+          tags: taskflow/api-gateway:ci
+          load: true
+
+      - name: Build task-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/task-service
+          push: false
+          tags: taskflow/task-service:ci
+          load: true
+
+      - name: Scan images for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: taskflow/task-service:ci
+          severity: CRITICAL,HIGH
+          exit-code: "0" # report only in Phase 1; tighten to fail the build in a later phase

@@ -1,0 +1,20 @@
+{
+  "name": "api-gateway",
+  "version": "0.1.0",
+  "description": "Reverse proxy / edge gateway for the TaskFlow platform",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "helmet": "^7.1.0",
+    "http-proxy-middleware": "^3.0.3",
+    "morgan": "^1.10.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

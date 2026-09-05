@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: taskflow
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/part-of: taskflow
+data:
+  TASK_SERVICE_URL: "http://task-service:8000"
+  API_GATEWAY_PORT: "8080"
