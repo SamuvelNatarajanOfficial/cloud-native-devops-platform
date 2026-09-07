@@ -1,0 +1,51 @@
+---
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: "{{ common_apt_cache_valid_time }}"
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Configure system timezone
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+  notify: Restart cron
+
+- name: Create application group
+  ansible.builtin.group:
+    name: "{{ common_app_group }}"
+    state: present
+    system: true
+  when: common_create_app_user
+
+- name: Create application user
+  ansible.builtin.user:
+    name: "{{ common_app_user }}"
+    group: "{{ common_app_group }}"
+    system: true
+    create_home: true
+    shell: /usr/sbin/nologin
+    comment: "TaskFlow application service account (managed by Ansible)"
+  when: common_create_app_user
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ common_app_user }}"
+    group: "{{ common_app_group }}"
+    mode: "0750"
+  loop: "{{ common_app_directories }}"
+  when: common_create_app_user
+
+- name: Configure Ansible-managed MOTD banner
+  ansible.builtin.template:
+    src: motd.j2
+    dest: "{{ common_motd_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_configure_motd

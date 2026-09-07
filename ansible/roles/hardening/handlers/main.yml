@@ -1,0 +1,12 @@
+---
+# "reload" (not "restart") on purpose: it re-reads sshd_config without
+# dropping already-established connections, so an in-progress SSH
+# session (e.g. the one Ansible is using) is not affected.
+#
+# The Ubuntu/Debian systemd unit for OpenSSH server is named "ssh", not
+# "sshd" (that's just the binary name) - using the wrong unit name here
+# would make this handler silently fail to find the service.
+- name: Reload SSH service
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded

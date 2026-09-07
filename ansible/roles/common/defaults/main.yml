@@ -1,0 +1,37 @@
+---
+# User-tunable knobs for the common role. Override in group_vars/host_vars
+# or with -e as needed.
+
+# Timezone applied via community.general.timezone (Olson/tz database name).
+common_timezone: "UTC"
+
+# Base packages installed on every server this role runs against.
+common_packages:
+  - curl
+  - vim
+  - git
+  - unzip
+  - ca-certificates
+  - gnupg
+  - htop
+
+# How long apt's cache is considered fresh before Ansible re-runs
+# `apt-get update` (seconds). Avoids updating the cache on every single
+# playbook run.
+common_apt_cache_valid_time: 3600
+
+# Application system account this role (and later ones) run services as,
+# instead of root.
+common_create_app_user: true
+common_app_user: "taskflow"
+common_app_group: "taskflow"
+
+# Directories created for the application user, e.g. for a future
+# TaskFlow deployment - not populated with anything yet in this phase.
+common_app_directories:
+  - /opt/taskflow
+  - /opt/taskflow/releases
+  - /opt/taskflow/shared
+
+# /etc/motd banner identifying this host as Ansible-managed.
+common_configure_motd: true

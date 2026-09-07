@@ -26,6 +26,20 @@ crash.*.log
 # .terraform.lock.hcl is intentionally NOT ignored: it pins exact provider
 # versions and should be committed for reproducible `terraform init` runs.
 
+# --- Ansible ---
+*.retry
+# Real inventory values (a copy of an inventory/**/hosts.yml with your
+# actual server address/hostname filled in) - see ansible/inventory/README.md.
+# No leading path component on purpose: this needs to match at any depth
+# (ansible/inventory/dev/hosts.local.yml, a future ansible/inventory/staging/..., etc).
+hosts.local.yml
+*.local.yml
+# Ansible Vault password files - the encrypted *.yml content Vault
+# produces is safe to commit, the password that decrypts it is not.
+.vault_pass
+*.vault_pass
+vault_password*
+
 # --- Node ---
 node_modules/
 npm-debug.log*

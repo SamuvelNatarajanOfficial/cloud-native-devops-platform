@@ -1,0 +1,5 @@
+Reserved for templates shared across multiple playbooks/roles. Every
+template this repo currently uses belongs to a single role and lives in
+that role's own templates/ directory instead (the more idiomatic Ansible
+default) - this top-level directory exists for the day a template needs
+to be shared, not because one does yet.

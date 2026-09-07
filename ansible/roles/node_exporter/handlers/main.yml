@@ -1,0 +1,12 @@
+---
+# Order here matters: Ansible runs notified handlers in the order they're
+# defined in this file (not the order they were notified in), so the
+# daemon-reload always happens before the restart it depends on.
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: restarted

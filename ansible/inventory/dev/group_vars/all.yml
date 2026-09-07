@@ -1,0 +1,23 @@
+---
+# Variables applied to every host in the "dev" inventory. These are
+# sensible lab/portfolio defaults, not production tuning - override
+# per-host or per-group as needed for a real environment.
+
+# --- common role ---
+common_timezone: "UTC"
+common_app_user: "taskflow"
+common_app_group: "taskflow"
+
+# --- docker role ---
+docker_add_app_user_to_group: true
+
+# --- node_exporter role ---
+node_exporter_listen_port: 9100
+
+# --- hardening role ---
+# Left OFF by default so cloning this repo and running the playbooks
+# never touches SSH access on their own. Read ansible/README.md's
+# "Security considerations" section, confirm key-based SSH access
+# already works, and only then set this true (here or with -e on the
+# command line) to apply the SSH hardening tasks.
+hardening_manage_ssh: false

@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: hardening
+  author: TaskFlow portfolio project
+  description: >-
+    Basic, portfolio-level Linux security hardening (automatic security
+    updates, disabling unneeded services, optional opt-in SSH hardening).
+    Not a substitute for a full CIS/DISA benchmark.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+dependencies: []

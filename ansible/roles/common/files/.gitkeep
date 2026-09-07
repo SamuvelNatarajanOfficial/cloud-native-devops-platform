@@ -1,0 +1,4 @@
+Reserved for static (non-templated) files this role copies verbatim.
+Nothing is needed here yet - kept so the directory exists and the role's
+structure matches Ansible convention (tasks/handlers/templates/files/
+vars/defaults).

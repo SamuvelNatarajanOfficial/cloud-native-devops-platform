@@ -1,0 +1,14 @@
+---
+# Master playbook: applies the full server configuration in one run.
+# Equivalent to running configure_servers.yml followed by hardening.yml -
+# split out below in case you want to apply base config and hardening as
+# separate, independently-reviewable steps.
+- name: Configure TaskFlow dev servers
+  hosts: dev_servers
+  become: true
+
+  roles:
+    - common
+    - docker
+    - node_exporter
+    - hardening

@@ -49,9 +49,10 @@ including health/readiness semantics and data model.
 | Container orchestration | Kubernetes (plain manifests)             |
 | Infrastructure as Code | Terraform (AWS VPC, IAM, EKS)             |
 | Target cloud       | AWS (EKS)                                      |
+| Configuration management | Ansible (Linux server config, Docker, Node Exporter, hardening) |
 | CI/CD              | GitHub Actions                                 |
 | Security scanning  | hadolint, Trivy, gitleaks                      |
-| *Planned*          | Ansible, Helm, ArgoCD, Prometheus, Grafana, Loki, Alertmanager |
+| *Planned*          | Helm, ArgoCD, Prometheus, Grafana, Loki, Alertmanager |
 
 See [docs/technology-decisions.md](docs/technology-decisions.md) for the
 reasoning behind each choice.
@@ -306,6 +307,76 @@ different variables, not a copy-pasted configuration. See
 [docs/aws-architecture.md](docs/aws-architecture.md#why-terraform-modules)
 for more detail.
 
+## Ansible configuration management & server automation (Phase 3)
+
+Ansible under [ansible/](ansible/) configures the **operating system** on
+a Linux server — a job Terraform (Phase 2) deliberately doesn't do.
+Terraform provisions AWS infrastructure (networking, IAM, the EKS
+cluster); Ansible then configures packages, timezone, an application
+user, Docker, Node Exporter, and basic security hardening on a
+general-purpose Ubuntu server reachable over SSH.
+
+**Scope note:** this targets a standalone Ubuntu host (e.g. a bastion or
+monitoring server) — **not** the EKS managed node group from Phase 2. EKS
+worker nodes are provisioned and patched by AWS itself; Ansible is never
+run against them here. See
+[docs/ansible-architecture.md](docs/ansible-architecture.md) for the full
+diagram and reasoning.
+
+### Ansible architecture
+
+```
+ansible/
+├── ansible.cfg
+├── requirements.yml        # community.general collection
+├── inventory/dev/          # placeholder host - see ansible/inventory/README.md
+├── playbooks/
+│   ├── site.yml             # common + docker + node_exporter + hardening
+│   ├── configure_servers.yml
+│   └── hardening.yml
+└── roles/
+    ├── common/               # packages, timezone, app user, MOTD
+    ├── docker/               # Docker Engine + daemon config
+    ├── node_exporter/        # pinned Node Exporter systemd service
+    └── hardening/            # auto security updates, unneeded services off, opt-in SSH hardening
+```
+
+Full details — variables, running playbooks, check mode, linting,
+idempotency, handlers, and security considerations — are in
+[ansible/README.md](ansible/README.md).
+
+### Terraform + Ansible relationship
+
+```
+Terraform → AWS infrastructure → Linux/compute → Ansible configuration
+   → Docker / Node Exporter → Kubernetes/EKS → Helm + ArgoCD → Observability
+```
+
+Terraform models AWS infrastructure as a dependency graph tracked in
+state; Ansible models the desired, idempotently-re-applied configuration
+of an already-running machine. Neither is a good substitute for the
+other — see
+[docs/ansible-architecture.md](docs/ansible-architecture.md#why-terraform-and-ansible-not-just-one-tool)
+for why this repo keeps them as two separate tools instead of leaning on
+Terraform provisioners to configure servers.
+
+### Security considerations
+
+- The committed inventory (`ansible/inventory/dev/hosts.yml`) contains a
+  placeholder host, never a real IP/hostname — see
+  [ansible/inventory/README.md](ansible/inventory/README.md) for the
+  gitignored `hosts.local.yml` pattern for pointing it at a real server.
+- SSH-affecting hardening (`hardening_manage_ssh`) is **off by default**
+  and validated with `sshd -t` before ever being installed — see
+  [ansible/README.md](ansible/README.md#security-considerations).
+- No AWS credential, IAM user, or long-lived secret is created or used by
+  anything under `ansible/` — it only ever needs SSH key access to a
+  Linux host.
+- CI ([.github/workflows/ansible.yml](.github/workflows/ansible.yml))
+  only runs `--syntax-check`, `ansible-lint`, and `ansible-inventory
+  --graph` — it never connects to a real host and never runs a playbook
+  for real.
+
 ## Future implementation phases
 
 - [x] **Phase 1 — Foundation**: application, Docker, docker-compose,
@@ -314,8 +385,12 @@ for more detail.
       IAM, and an EKS cluster (see [AWS & Terraform infrastructure](#aws--terraform-infrastructure-phase-2)
       above). Provisioning only — the cluster is not yet wired up to
       deploy Phase 1's manifests automatically.
-- [ ] **Phase 3 — Configuration management**: Ansible for anything not
-      natively managed by Kubernetes.
+- [x] **Phase 3 — Configuration management**: Ansible roles for base
+      Linux config, Docker, Node Exporter, and opt-in security hardening
+      on a standalone server (see
+      [Ansible configuration management & server automation](#ansible-configuration-management--server-automation-phase-3)
+      above). Targets a general-purpose Ubuntu host, not the EKS managed
+      node group.
 - [ ] **Phase 4 — GitOps delivery**: ArgoCD reconciling this repo's
       manifests (via Helm charts) onto the EKS cluster.
 - [ ] **Phase 5 — Observability**: Prometheus, Grafana, Loki, and

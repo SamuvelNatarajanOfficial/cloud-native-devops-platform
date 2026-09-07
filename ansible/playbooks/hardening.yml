@@ -1,0 +1,12 @@
+---
+# Security hardening only. Safe to run on its own and safe by default:
+# every SSH-related change stays off unless hardening_manage_ssh is set
+# to true (see roles/hardening/defaults/main.yml and
+# ansible/README.md's "Security considerations" section) - review that
+# before enabling it against any host you can't otherwise recover.
+- name: Apply basic security hardening
+  hosts: dev_servers
+  become: true
+
+  roles:
+    - hardening

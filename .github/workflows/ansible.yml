@@ -1,0 +1,76 @@
+name: Ansible
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/**"
+      - ".github/workflows/ansible.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ansible/**"
+      - ".github/workflows/ansible.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Syntax check & ansible-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible + ansible-lint
+        run: pip install ansible-core ansible-lint
+
+      - name: Install required collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Parses each playbook and the roles/inventory it references. Does
+      # NOT connect to any host - no credentials or real infrastructure
+      # are involved.
+      - name: Ansible syntax check
+        run: |
+          ansible-playbook playbooks/site.yml --syntax-check
+          ansible-playbook playbooks/configure_servers.yml --syntax-check
+          ansible-playbook playbooks/hardening.yml --syntax-check
+
+      # Fully static analysis - no connection to any host either.
+      - name: ansible-lint
+        run: ansible-lint
+
+  inventory-check:
+    name: Inventory parses correctly
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install ansible-core
+
+      # Confirms the committed placeholder inventory is well-formed YAML
+      # that Ansible can load - it never resolves/connects to the
+      # placeholder host.
+      - name: ansible-inventory --graph
+        run: ansible-inventory --graph
+
+# This workflow intentionally never runs `ansible-playbook` without
+# --syntax-check, never runs --check against a real host, and never
+# configures SSH credentials - playbooks are only ever applied manually,
+# by a human, against a host they control. See ansible/README.md.

@@ -1,0 +1,32 @@
+---
+# Docker's official APT repository (Ubuntu). See
+# https://docs.docker.com/engine/install/ubuntu/ for the upstream steps
+# this role automates.
+docker_apt_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+docker_apt_repo_url: "https://download.docker.com/linux/ubuntu"
+
+# amd64 covers the common case (e.g. t3.* EC2 instances from Phase 2's
+# Terraform). Override to arm64 for Graviton/ARM hosts.
+docker_apt_arch: "amd64"
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+docker_package_state: present
+
+docker_service_enabled: true
+docker_service_state: started
+
+# json-file log driver defaults on a fresh Docker install grow without
+# bound - cap them so a chatty container can't fill the disk.
+docker_daemon_log_max_size: "10m"
+docker_daemon_log_max_file: "3"
+
+# Adds this user to the "docker" group (passwordless access to the Docker
+# socket - equivalent to root on this host). Defaults to the application
+# user created by the common role; only takes effect if that user exists.
+docker_add_app_user_to_group: true
+docker_app_user: "{{ common_app_user | default('taskflow') }}"

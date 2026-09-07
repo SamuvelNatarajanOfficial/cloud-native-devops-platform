@@ -1,0 +1,10 @@
+---
+# Third-party collection dependencies. Install with:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# community.general is used for a single module (timezone) that ships in
+# that collection rather than ansible-core - everything else in this repo
+# only uses ansible.builtin modules.
+collections:
+  - name: community.general
+    version: ">=8.0.0"

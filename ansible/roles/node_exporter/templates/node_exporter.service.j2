@@ -1,0 +1,23 @@
+{{ ansible_managed | default('Managed by Ansible.') }}
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ node_exporter_user }}
+Group={{ node_exporter_group }}
+ExecStart={{ node_exporter_install_dir }}/node_exporter --web.listen-address={{ node_exporter_listen_address }}:{{ node_exporter_listen_port }}{% for arg in node_exporter_extra_args %} {{ arg }}{% endfor %}
+
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

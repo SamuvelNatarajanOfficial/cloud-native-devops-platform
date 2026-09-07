@@ -1,0 +1,12 @@
+---
+# Base server configuration only: packages, timezone, application
+# user/directories, Docker, and Node Exporter. No security-hardening
+# tasks run from this playbook - see hardening.yml for those.
+- name: Configure base server software
+  hosts: dev_servers
+  become: true
+
+  roles:
+    - common
+    - docker
+    - node_exporter

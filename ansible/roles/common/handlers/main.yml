@@ -1,0 +1,8 @@
+---
+# cron caches the timezone at start-up, so a timezone change (above)
+# should be followed by a cron restart or scheduled jobs can briefly run
+# at the old local time. See community.general.timezone's own module docs.
+- name: Restart cron
+  ansible.builtin.systemd:
+    name: cron
+    state: restarted

@@ -1,0 +1,17 @@
+---
+# ansible-lint configuration.
+#
+# "safety" is stricter than the default ("min"/"basic") profile - it
+# enforces FQCN module names, no plain-text secrets, safe file
+# permissions, etc. - without pulling in "production"-profile rules that
+# only make sense for a published, versioned Galaxy collection (changelog
+# fragments, meta/runtime.yml requirements, and so on), which don't apply
+# to a single-repo portfolio project like this one.
+profile: safety
+
+exclude_paths:
+  - .cache/
+  - .github/
+
+# no `skip_list` / `warn_list` entries: lint findings in this repo are
+# fixed, not silenced.

@@ -1,0 +1,5 @@
+---
+# Role-internal constants. Unlike defaults/main.yml (meant to be
+# overridden per-environment), these describe implementation details of
+# this role itself and aren't expected to change between environments.
+common_motd_path: /etc/motd

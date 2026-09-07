@@ -1,0 +1,2 @@
+Reserved for static files shared across multiple playbooks/roles, same
+reasoning as templates/.gitkeep next to this file - nothing here yet.

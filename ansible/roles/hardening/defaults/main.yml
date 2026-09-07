@@ -1,0 +1,24 @@
+---
+# --- Safe by default: automatic security updates ---
+hardening_unattended_upgrades_enabled: true
+
+# --- Safe by default: disable services a headless server doesn't need ---
+# Each is only touched if ansible.builtin.service_facts finds it present -
+# a no-op on a minimal cloud image that never had them installed.
+hardening_disable_unnecessary_services: true
+hardening_unnecessary_services:
+  - avahi-daemon
+  - cups
+
+# --- NOT safe by default: SSH access changes ---
+# This master switch is OFF on purpose. Flipping it (and the two flags
+# below) to true changes how you're allowed to SSH into this host - get
+# it wrong (or apply it before confirming key-based login works) and you
+# can lock yourself out. See ansible/README.md's "Security
+# considerations" section before ever setting this true.
+hardening_manage_ssh: false
+
+# Only applied when hardening_manage_ssh is true.
+hardening_ssh_disable_root_login: true
+hardening_ssh_disable_password_authentication: true
+hardening_ssh_config_path: /etc/ssh/sshd_config.d/99-ansible-hardening.conf

@@ -1,0 +1,26 @@
+---
+# Pinned deliberately - never track "latest" for a binary that runs as a
+# systemd service. Bump this (and re-run the role) to upgrade.
+node_exporter_version: "1.8.2"
+node_exporter_arch: "amd64"
+
+node_exporter_release_base_url: "https://github.com/prometheus/node_exporter/releases/download"
+node_exporter_archive_name: "node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}"
+node_exporter_download_url: "{{ node_exporter_release_base_url }}/v{{ node_exporter_version }}/{{ node_exporter_archive_name }}.tar.gz"
+
+# Optional integrity check: set to the "sha256:<hex>" value published in
+# that release's SHA256SUMS file to verify the download. Left empty by
+# default (no verification) to avoid shipping a checksum that would go
+# stale the moment node_exporter_version is bumped.
+node_exporter_checksum: ""
+
+node_exporter_user: "node_exporter"
+node_exporter_group: "node_exporter"
+node_exporter_install_dir: "/usr/local/bin"
+
+node_exporter_listen_address: "0.0.0.0"
+node_exporter_listen_port: 9100
+
+# Extra CLI flags appended to ExecStart as-is, e.g.
+# ["--collector.systemd", "--no-collector.wifi"].
+node_exporter_extra_args: []

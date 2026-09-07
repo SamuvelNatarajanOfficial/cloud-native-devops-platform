@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: common
+  author: TaskFlow portfolio project
+  description: Base Linux server configuration - packages, timezone, application user/directories, MOTD.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+dependencies: []
