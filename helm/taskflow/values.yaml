@@ -1,0 +1,210 @@
+# Default values for the taskflow chart.
+#
+# These are portfolio/lab defaults, not production-tuned numbers - see
+# values-dev.yaml / values-prod.yaml for environment-specific overrides,
+# and helm/taskflow/README.md for what every value below means.
+
+global:
+  # Namespace every chart resource is created in.
+  namespace: taskflow
+
+  # The chart does NOT create this namespace itself by default. Reason:
+  # if a Namespace object were part of what ArgoCD/Helm manages and later
+  # pruned, that would delete everything in the namespace - a much bigger
+  # blast radius than intended. Use `helm install --create-namespace`, or
+  # (for ArgoCD) the Application's `CreateNamespace=true` syncOption,
+  # which creates the namespace once without making it a pruned/managed
+  # resource. See helm/taskflow/README.md and argocd/README.md.
+  createNamespace: false
+
+  # Only needed for a private image registry - unused for the public
+  # images this chart references by default.
+  imagePullSecrets: []
+
+apiGateway:
+  replicaCount: 2
+
+  image:
+    repository: taskflow/api-gateway
+    # Empty -> falls back to .Chart.AppVersion (see templates/_helpers.tpl).
+    # Deliberately never defaults to "latest" - see
+    # docs/technology-decisions.md ("Why avoid latest image tags?").
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # Portfolio/lab defaults, not load-tested numbers - see
+  # helm/taskflow/README.md.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 128Mi
+
+  # Reuses the /health and /ready endpoints already implemented in Phase 1
+  # (services/api-gateway/src/app.js) - no new endpoints invented here.
+  # /health = liveness (process is up); /ready = readiness (can reach
+  # task-service).
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 15
+      timeoutSeconds: 2
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 3
+
+  # See helm/taskflow/README.md's "Security context" section - this
+  # profile matches how the image is actually built (a non-root "app"
+  # user, no runtime writes outside /tmp).
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+taskService:
+  replicaCount: 2
+
+  image:
+    repository: taskflow/task-service
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  env:
+    logLevel: info
+
+  database:
+    # Name of a pre-created Secret containing a DATABASE_URL key, used
+    # instead of the chart-generated connection string (see
+    # postgres.auth below) when set. Recommended for anything beyond a
+    # local/lab deployment - see helm/taskflow/README.md's "Secrets"
+    # section. Left empty by default so the chart works out of the box
+    # against its own bundled dev Postgres.
+    existingSecret: ""
+    existingSecretKey: DATABASE_URL
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Reuses the /health and /ready endpoints already implemented in Phase 1
+  # (services/task-service/app/main.py). /health = liveness (process is
+  # up); /ready = readiness (database connection actually usable).
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      timeoutSeconds: 2
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 3
+
+  securityContext:
+    pod:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+postgres:
+  # This is a demo/lab Postgres for the portfolio environment, NOT a
+  # substitute for a managed database service - see
+  # helm/taskflow/README.md's "PostgreSQL" section for what that means in
+  # practice (no replication, no automated backups, no failover).
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 5432
+
+  auth:
+    database: taskflow
+    username: taskflow
+    # DEV-ONLY placeholder, intentionally not a real secret - matches the
+    # same placeholder convention docker-compose.yml and
+    # kubernetes/postgres/secret.example.yaml already use. Never set a
+    # real password here; use existingSecret instead. See
+    # helm/taskflow/README.md's "Secrets" section.
+    password: "changeme-dev-only"
+    existingSecret: ""
+    existingSecretUserKey: POSTGRES_USER
+    existingSecretPasswordKey: POSTGRES_PASSWORD
+
+  persistence:
+    enabled: true
+    size: 1Gi
+    # "" = the cluster's default StorageClass (e.g. EKS's gp2/gp3 default).
+    storageClassName: ""
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Intentionally a smaller subset than apiGateway/taskService's security
+  # context - see helm/taskflow/README.md's "Security context" section
+  # for exactly why (the stock postgres image's entrypoint needs to
+  # start as root to prepare the data directory on first run, before
+  # dropping privileges internally). This is based on that image's
+  # documented behavior, not applied blindly - but it was not verified
+  # against a live cluster in this phase (see the root Phase 4 summary's
+  # "Known limitations").
+  securityContext:
+    pod: {}
+    container:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

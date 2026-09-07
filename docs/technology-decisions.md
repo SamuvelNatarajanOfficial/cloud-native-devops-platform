@@ -121,12 +121,85 @@ service principal (`eks.amazonaws.com`, `ec2.amazonaws.com`), each with
 only the AWS-managed policies EKS documents as the minimum required. No
 long-lived access key exists anywhere in this configuration to leak.
 
+## Configuration management (Phase 3)
+
+**Ansible**
+Configures the operating system on a standalone Linux server (packages,
+timezone, an application user, Docker, Node Exporter, basic hardening) —
+a job deliberately kept separate from Terraform, which only provisions
+AWS infrastructure. See
+[docs/ansible-architecture.md](ansible-architecture.md#why-terraform-and-ansible-not-just-one-tool)
+for the full reasoning.
+
+## GitOps delivery (Phase 4)
+
+**Why Helm?**
+Helm turns the Phase 1 hand-written manifests (`kubernetes/`) into a
+templated, versioned, parameterized package: one `image.tag` value
+instead of editing every Deployment by hand, one chart driven by
+different `values-*.yaml` files instead of maintaining full duplicate
+manifest sets per environment. It's also the de facto standard packaging
+format for Kubernetes applications, and what ArgoCD integrates with
+natively.
+
+**Why ArgoCD?**
+ArgoCD runs *inside* the cluster and continuously reconciles live state
+against Git, rather than only pushing changes at deploy time (the model a
+plain CI-driven `kubectl apply`/`helm upgrade` step would use). That
+continuous reconciliation is what gives GitOps its two defining
+properties: drift correction (a manual `kubectl edit` doesn't
+permanently stick) and a live dashboard of "does the cluster actually
+match Git right now," not just "did the last deploy succeed."
+
+**Why GitOps?**
+Making Git the source of truth means every deployed change already has
+what most deployment pipelines have to build separately: a full audit
+trail (who changed what, reviewed via a PR, at what commit), and a
+rollback mechanism that's just a Git operation (`git revert`) rather than
+a separate, only-sometimes-tested "rollback script." See
+[docs/gitops-architecture.md](gitops-architecture.md) for the full
+explanation, including what's actually implemented vs. only documented in
+this portfolio.
+
+**Why separate Terraform from application deployment?**
+Terraform's state file tracks *infrastructure* (a VPC, an EKS cluster) —
+resources with real, expensive, slow-to-recreate lifecycles. Application
+deployments change far more often than infrastructure does, and shouldn't
+share a state file, a plan/apply cycle, or a blast radius with a VPC route
+table. Keeping them as two separate tools (and two separate Git-tracked
+concerns: `terraform/` vs. `helm/`+`argocd/`) means a routine app
+deployment can never accidentally touch infrastructure, and vice versa.
+
+**Why `values-dev.yaml` and `values-prod.yaml`?**
+The point of a values file per environment is that the exact same
+templates/logic run in both — only the *data* differs (replica counts,
+resource sizing, which Secret to reference). That's a stronger guarantee
+than two independently-maintained manifest sets, which can silently drift
+apart in ways that are only discovered when production behaves
+differently than the environment it was supposedly tested in.
+
+**Why avoid `latest` image tags?**
+`latest` is not a version — it's a mutable pointer that can silently
+change underneath a running deployment, makes "what's actually deployed
+right now" unanswerable from the tag alone, and defeats rollback (there's
+no previous `latest` to go back to). This chart's `image.tag` defaults to
+`.Chart.AppVersion` and `values-prod.yaml`'s example uses an explicit
+version string; a real registry-integrated pipeline would use the Git SHA
+instead (see `.github/workflows/ci.yml`'s build-images job, which already
+tags images with `${{ github.sha }}` even though nothing is pushed yet).
+
+**Why keep secrets outside Git?**
+A Git repository's history is effectively permanent and, for a public
+portfolio repo, world-readable — a credential committed once (even if
+later deleted) has to be treated as compromised forever. This chart's
+`existingSecret` pattern (see `helm/taskflow/README.md`'s "Secrets"
+section) lets real credentials live only in the cluster (created
+out-of-band, e.g. via `kubectl create secret`), while everything that
+*is* safe to version — the chart, the values files, which Secret name to
+reference — stays in Git.
+
 ## Reserved for later phases (not yet implemented)
 
-- **Ansible** — configuration management for anything not natively
-  Kubernetes-managed.
-- **ArgoCD** — GitOps-based continuous delivery once there's a
-  Git-defined desired state to reconcile against the EKS cluster.
 - **Prometheus / Grafana / Loki / Alertmanager** — the observability
   stack; `task-service` already exposes `/metrics` in anticipation of
   this.

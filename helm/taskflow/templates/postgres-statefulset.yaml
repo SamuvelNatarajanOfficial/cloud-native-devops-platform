@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "postgres") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  # Deliberately not configurable: this chart runs a single, unreplicated
+  # Postgres instance for the portfolio/lab environment (no streaming
+  # replication is configured) - see helm/taskflow/README.md's
+  # "PostgreSQL" section. It is not a substitute for a managed database
+  # service such as Amazon RDS.
+  replicas: 1
+  serviceName: {{ include "taskflow.componentFullname" (dict "root" . "component" "postgres") }}
+  selector:
+    matchLabels:
+      {{- include "taskflow.selectorLabels" (dict "root" . "component" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "taskflow.componentLabels" (dict "root" . "component" "postgres") | nindent 8 }}
+      {{- with .Values.postgres.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.securityContext.pod }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.postgres.securityContext.container | nindent 12 }}
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.postgres.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "taskflow.componentFullname" (dict "root" . "component" "postgres") }}
+            - secretRef:
+                name: {{ .Values.postgres.auth.existingSecret | default (include "taskflow.componentFullname" (dict "root" . "component" "postgres")) }}
+          # Reused as both liveness and readiness (matching Phase 1's
+          # kubernetes/postgres/deployment.yaml) - pg_isready is already
+          # the right check for both "is the process alive" and "can it
+          # accept connections" for a database engine; only the timing
+          # differs between the two probes.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      {{- with .Values.postgres.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if not .Values.postgres.persistence.enabled }}
+      volumes:
+        - name: postgres-data
+          emptyDir: {}
+          # NOTE: emptyDir is NOT durable across pod restarts/rescheduling.
+          # This only exists for a quick local test when
+          # postgres.persistence.enabled=false - use the default (true)
+          # for anything you want to survive a pod restart.
+      {{- end }}
+  {{- if .Values.postgres.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          {{- include "taskflow.componentLabels" (dict "root" . "component" "postgres") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.persistence.storageClassName }}
+        storageClassName: {{ .Values.postgres.persistence.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size }}
+  {{- end }}

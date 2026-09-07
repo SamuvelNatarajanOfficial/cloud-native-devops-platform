@@ -1,0 +1,26 @@
+TaskFlow ({{ .Chart.Name }} chart v{{ .Chart.Version }}, app v{{ .Chart.AppVersion }}) has been installed into namespace "{{ .Values.global.namespace }}".
+
+Check rollout status:
+
+  kubectl -n {{ .Values.global.namespace }} rollout status deployment/{{ include "taskflow.componentFullname" (dict "root" . "component" "api-gateway") }}
+  kubectl -n {{ .Values.global.namespace }} rollout status deployment/{{ include "taskflow.componentFullname" (dict "root" . "component" "task-service") }}
+  kubectl -n {{ .Values.global.namespace }} rollout status statefulset/{{ include "taskflow.componentFullname" (dict "root" . "component" "postgres") }}
+
+Reach the API gateway (task-service and postgres are intentionally
+ClusterIP-only and not reachable from outside the cluster):
+
+  kubectl -n {{ .Values.global.namespace }} port-forward svc/{{ include "taskflow.componentFullname" (dict "root" . "component" "api-gateway") }} 8080:{{ .Values.apiGateway.service.port }}
+  curl http://localhost:8080/health
+  curl http://localhost:8080/api/tasks
+
+{{- if not .Values.postgres.auth.existingSecret }}
+
+NOTE: postgres.auth.existingSecret is not set, so this release is using
+the chart's built-in dev-only Postgres password (see values.yaml /
+helm/taskflow/README.md's "Secrets" section). Do not use this release
+configuration as-is for anything beyond a local/lab deployment.
+{{- end }}
+
+Full documentation: helm/taskflow/README.md
+GitOps/ArgoCD documentation: argocd/README.md
+Architecture: docs/gitops-architecture.md

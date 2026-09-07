@@ -23,8 +23,9 @@ something concrete to build, test, deploy, and monitor.
   production-minded practices (non-root containers, health probes,
   resource limits, layered CI checks).
 - Build up, phase by phase, a complete cloud-native delivery pipeline:
-  containers → Kubernetes → Terraform/AWS/EKS → GitOps (ArgoCD) →
-  observability (Prometheus/Grafana/Loki/Alertmanager).
+  containers → Kubernetes → Terraform/AWS/EKS → Ansible →
+  Helm/ArgoCD (GitOps) → observability
+  (Prometheus/Grafana/Loki/Alertmanager).
 - Keep every phase independently reviewable, so the git history itself
   tells the story of how the platform was built.
 
@@ -50,9 +51,11 @@ including health/readiness semantics and data model.
 | Infrastructure as Code | Terraform (AWS VPC, IAM, EKS)             |
 | Target cloud       | AWS (EKS)                                      |
 | Configuration management | Ansible (Linux server config, Docker, Node Exporter, hardening) |
+| Packaging          | Helm (templated, environment-parameterized chart) |
+| GitOps delivery     | ArgoCD (not yet installed - see Phase 4 below)   |
 | CI/CD              | GitHub Actions                                 |
 | Security scanning  | hadolint, Trivy, gitleaks                      |
-| *Planned*          | Helm, ArgoCD, Prometheus, Grafana, Loki, Alertmanager |
+| *Planned*          | Prometheus, Grafana, Loki, Alertmanager        |
 
 See [docs/technology-decisions.md](docs/technology-decisions.md) for the
 reasoning behind each choice.
@@ -377,6 +380,82 @@ Terraform provisioners to configure servers.
   --graph` — it never connects to a real host and never runs a playbook
   for real.
 
+## Helm + ArgoCD + GitOps delivery (Phase 4)
+
+A Helm chart under [helm/taskflow/](helm/taskflow/) packages the Phase 1
+application (api-gateway, task-service, PostgreSQL) for GitOps delivery,
+and ArgoCD manifests under [argocd/](argocd/) declare how an
+already-installed ArgoCD would deploy it onto the EKS cluster from Phase
+2. **This phase is validated (`helm lint`/`helm template`/YAML
+validation — see the Phase 4 implementation summary for exact commands
+and results) but not deployed**: no image has been pushed to a real
+registry, ArgoCD has not been installed anywhere, and nothing has been
+applied to the real EKS cluster. See
+[docs/gitops-architecture.md](docs/gitops-architecture.md) for the full
+diagram and what's implemented vs. documented/future.
+
+### The intended workflow
+
+```
+Developer pushes code
+   |
+   v
+GitHub Actions (test / security scan / build image)
+   |
+   v
+Container image
+   |
+   v                                    <- not yet wired up: push to a
+GitOps manifest/chart update               real registry + commit the
+   |                                       new tag back into Git (see
+   v                                       docs/gitops-architecture.md)
+ArgoCD detects the Git change
+   |
+   v
+ArgoCD reconciles
+   |
+   v
+EKS -> TaskFlow application
+```
+
+### Helm chart
+
+Three components (api-gateway, task-service, PostgreSQL-as-StatefulSet),
+one chart, driven by `values.yaml` + an environment overlay
+(`values-dev.yaml` for a small lab environment; `values-prod.yaml` as a
+documented, more conservative configuration *example* that nothing
+deploys automatically). Reuses Phase 1's exact `/health`/`/ready`
+endpoints for probes, and Phase 1's Dockerfiles' existing non-root users
+for its security context. Full details:
+[helm/taskflow/README.md](helm/taskflow/README.md).
+
+### ArgoCD / GitOps
+
+A dedicated `taskflow` `AppProject` (restricting source repo, destination
+namespace, and resource kinds) plus one dev `Application` with automated
+sync (`prune: true`, `selfHeal: true` — see
+[argocd/README.md](argocd/README.md#sync-behavior) for exactly what those
+mean and why they're appropriate for this low-stakes dev namespace, but
+not something to copy onto a real production Application without
+deciding that trade-off deliberately). Full details:
+[argocd/README.md](argocd/README.md).
+
+### Security considerations
+
+- No image is pushed to a registry and no long-lived AWS/registry
+  credential was added anywhere in this phase.
+- No real password appears in `values-prod.yaml` — it uses the
+  `existingSecret` pattern (a pre-created Kubernetes Secret referenced by
+  name) instead. See
+  [helm/taskflow/README.md](helm/taskflow/README.md#secrets).
+- Image tags avoid `latest` throughout — the chart defaults to
+  `.Chart.AppVersion`, and `.github/workflows/ci.yml`'s build job now
+  also tags images with the commit SHA (still never pushed anywhere -
+  see [docs/technology-decisions.md](docs/technology-decisions.md)).
+- The ArgoCD `AppProject` restricts source repos, destination
+  namespace, and resource kinds rather than granting unrestricted
+  cluster permissions.
+
 ## Future implementation phases
 
 - [x] **Phase 1 — Foundation**: application, Docker, docker-compose,
@@ -391,8 +470,12 @@ Terraform provisioners to configure servers.
       [Ansible configuration management & server automation](#ansible-configuration-management--server-automation-phase-3)
       above). Targets a general-purpose Ubuntu host, not the EKS managed
       node group.
-- [ ] **Phase 4 — GitOps delivery**: ArgoCD reconciling this repo's
-      manifests (via Helm charts) onto the EKS cluster.
+- [x] **Phase 4 — GitOps delivery**: a Helm chart for TaskFlow plus
+      ArgoCD `AppProject`/`Application` manifests (see
+      [Helm + ArgoCD + GitOps delivery](#helm--argocd--gitops-delivery-phase-4)
+      above). Validated with `helm lint`/`helm template`/YAML
+      validation — ArgoCD has not been installed anywhere and nothing
+      has been deployed to a real cluster.
 - [ ] **Phase 5 — Observability**: Prometheus, Grafana, Loki, and
       Alertmanager, wired to the `/metrics` endpoints already in place.
 - [ ] **Phase 6 — Production concerns**: DNS, load balancing/ingress,

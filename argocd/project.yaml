@@ -1,0 +1,56 @@
+# A dedicated ArgoCD AppProject for TaskFlow, instead of using ArgoCD's
+# default project (which permits any source repo and any destination by
+# default). Scoping this down means a mistake in a future Application
+# definition can't accidentally point at an arbitrary Git repo or another
+# namespace/cluster - see argocd/README.md's "Creating the project"
+# section.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: taskflow
+  namespace: argocd
+spec:
+  description: TaskFlow portfolio application - Helm chart deployed via GitOps.
+
+  # Only this repository may be used as a source for Applications in this
+  # project. Replace with your own fork's URL if you're not
+  # SamuvelNatarajanOfficial.
+  sourceRepos:
+    - https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+
+  # Only the in-cluster API server (i.e. the same EKS cluster ArgoCD
+  # itself runs in - the standard, simplest GitOps topology) and only the
+  # taskflow namespace. An Application in this project cannot target any
+  # other cluster or namespace.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: taskflow
+
+  # Deliberately NOT permitting cluster-scoped resources: everything this
+  # chart creates (Deployment, StatefulSet, Service, ConfigMap, Secret,
+  # PVC) is namespaced. The Namespace resource itself is created via the
+  # Application's CreateNamespace=true syncOption instead (see
+  # application-dev.yaml), not as a project-level cluster resource
+  # allowance.
+  clusterResourceWhitelist: []
+
+  # Every namespaced Kind this chart actually creates - not a blanket "*"
+  # allow-all, so a future template accidentally creating some other Kind
+  # (e.g. a ClusterRoleBinding) would be rejected by ArgoCD rather than
+  # silently permitted.
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+
+  orphanedResources:
+    warn: true

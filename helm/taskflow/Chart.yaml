@@ -1,0 +1,32 @@
+apiVersion: v2
+name: taskflow
+description: >-
+  Helm chart for the TaskFlow microservices application (api-gateway,
+  task-service, PostgreSQL) - a portfolio project demonstrating Helm +
+  GitOps (ArgoCD) delivery onto EKS.
+type: application
+
+# Chart version: tracks changes to this chart's templates/structure.
+# Bump this whenever templates, values schema, or chart metadata change -
+# independently of whether the application itself changed.
+version: 0.1.0
+
+# App version: tracks the TaskFlow application's own version (matches
+# services/api-gateway/package.json and the FastAPI `version=` in
+# services/task-service/app/main.py, both currently "0.1.0"). Bump this
+# when the application changes, independently of the chart.
+#
+# See helm/taskflow/README.md's "Chart version vs. app version" section
+# for the full explanation of why these two numbers are allowed to (and
+# will, over time) diverge.
+appVersion: "0.1.0"
+
+keywords:
+  - taskflow
+  - portfolio
+  - microservices
+  - gitops
+
+home: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform
+sources:
+  - https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform

@@ -1,0 +1,122 @@
+# ============================================================================
+# PRODUCTION-STYLE CONFIGURATION EXAMPLE ONLY
+# ============================================================================
+# This file is NOT deployed by anything in this repository automatically,
+# is NOT wired to any ArgoCD Application here (see argocd/ - only a dev
+# Application exists), and does NOT represent a real, running production
+# environment. It exists to demonstrate what a more conservative,
+# production-style values file looks like: more replicas, stricter health
+# checks, and secrets sourced from a pre-created Kubernetes Secret instead
+# of a chart-generated one.
+#
+# Applying this file for real would additionally require: a real container
+# registry + pushed images (see docs/technology-decisions.md), a real
+# production EKS environment (Phase 2's Terraform only defines "dev"), and
+# actually creating the Secrets referenced below out-of-band. None of that
+# is done here - this is a documented example, not a deployment.
+# ============================================================================
+
+global:
+  namespace: taskflow
+  createNamespace: false
+
+apiGateway:
+  replicaCount: 3
+
+  image:
+    # Example only - pin to a real, immutable tag (a Git SHA or semantic
+    # version) once a real registry/release process exists. Never
+    # "latest" - see docs/technology-decisions.md.
+    tag: "0.1.0"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Stricter than values.yaml's lab defaults: a shorter period catches a
+  # stuck pod faster, and a higher failureThreshold avoids flapping a pod
+  # out of rotation on one slow response.
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+taskService:
+  replicaCount: 3
+
+  image:
+    tag: "0.1.0"
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 750m
+      memory: 512Mi
+
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+  database:
+    # Production pattern: point at a pre-created Secret (containing a
+    # DATABASE_URL key) instead of letting the chart generate one from
+    # postgres.auth.password. In a real setup this would typically point
+    # at a managed database (e.g. Amazon RDS), not the in-chart Postgres
+    # StatefulSet below. Create it yourself, e.g.:
+    #   kubectl -n taskflow create secret generic taskflow-database-url \
+    #     --from-literal=DATABASE_URL='postgresql+psycopg2://...'
+    # This name is a placeholder - it does not exist until you create it.
+    existingSecret: "taskflow-database-url"
+    existingSecretKey: DATABASE_URL
+
+postgres:
+  persistence:
+    enabled: true
+    size: 10Gi
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 750m
+      memory: 1Gi
+
+  auth:
+    # No password is set here on purpose - existingSecret below is used
+    # instead, so this value is never read. See helm/taskflow/README.md's
+    # "Secrets" section.
+    password: ""
+    # Placeholder name - create it yourself before this could ever be
+    # applied for real, e.g.:
+    #   kubectl -n taskflow create secret generic taskflow-postgres-credentials \
+    #     --from-literal=POSTGRES_USER=taskflow \
+    #     --from-literal=POSTGRES_PASSWORD='<a real generated password>'
+    existingSecret: "taskflow-postgres-credentials"
+    existingSecretUserKey: POSTGRES_USER
+    existingSecretPasswordKey: POSTGRES_PASSWORD

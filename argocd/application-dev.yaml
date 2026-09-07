@@ -1,0 +1,63 @@
+# ArgoCD Application for the "dev" environment - the only Application
+# defined in this repository (see argocd/README.md for why a "prod"
+# Application is intentionally not included). Applying this manifest
+# tells an already-installed ArgoCD to start reconciling this chart; it
+# does not install ArgoCD itself, and nothing in this repository applies
+# it automatically. See argocd/README.md's "Creating the application"
+# section.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskflow-dev
+  namespace: argocd
+spec:
+  project: taskflow
+
+  source:
+    # Replace with your own fork's URL if you're not
+    # SamuvelNatarajanOfficial - must match a repo listed in
+    # argocd/project.yaml's sourceRepos, or ArgoCD will reject this
+    # Application.
+    repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+    targetRevision: main
+    path: helm/taskflow
+    helm:
+      valueFiles:
+        - values-dev.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskflow
+
+  syncPolicy:
+    automated:
+      # prune: also delete resources that were removed from Git. Without
+      # this, deleting a template from the chart would leave the
+      # corresponding resource running in the cluster forever - Git would
+      # no longer be a complete description of what's actually deployed.
+      prune: true
+      # selfHeal: revert manual/out-of-band changes made directly against
+      # the cluster (e.g. `kubectl edit`, `kubectl scale`) back to what
+      # Git says, the next time ArgoCD reconciles. This is what makes
+      # Git - not the live cluster - the actual source of truth.
+      #
+      # Both are enabled here because this is a low-stakes dev/lab
+      # namespace: an unwanted prune or self-heal just re-applies this
+      # chart's own declared state, and every change path is a
+      # reviewable Git commit. Do NOT copy prune+selfHeal into a
+      # "prod" Application without deciding that trade-off deliberately -
+      # see argocd/README.md's "Sync policy" section.
+      selfHeal: true
+    syncOptions:
+      # Creates the taskflow namespace if it doesn't exist yet, via
+      # ArgoCD's own pre-sync mechanism - not by adding a Namespace
+      # object to this project's clusterResourceWhitelist (see
+      # argocd/project.yaml). Matches
+      # helm/taskflow's global.createNamespace: false in values-dev.yaml.
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

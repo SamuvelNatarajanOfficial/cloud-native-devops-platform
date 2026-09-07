@@ -1,0 +1,14 @@
+{{- /*
+Off by default (see global.createNamespace in values.yaml for why: a
+Namespace object managed/pruned by a GitOps controller is a much bigger
+blast radius than intended). Enable only for a standalone `helm install`
+that isn't already using --create-namespace.
+*/ -}}
+{{- if .Values.global.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.labels" . | nindent 4 }}
+{{- end }}

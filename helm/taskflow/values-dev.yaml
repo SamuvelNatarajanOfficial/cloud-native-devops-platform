@@ -1,0 +1,56 @@
+# Development/lab environment overrides.
+#
+# Intended for a small EKS cluster (see terraform/environments/dev - the
+# same "dev" environment name is deliberate) or a local cluster
+# (kind/minikube/Docker Desktop). Only overrides what actually differs
+# from values.yaml's defaults - see that file for every value not
+# repeated here.
+#
+# Usage:
+#   helm install taskflow helm/taskflow -f helm/taskflow/values-dev.yaml
+#   helm template taskflow helm/taskflow -f helm/taskflow/values-dev.yaml
+
+global:
+  namespace: taskflow
+  # Matches the ArgoCD dev Application's own CreateNamespace=true
+  # syncOption - see argocd/application-dev.yaml and
+  # helm/taskflow/README.md for why the chart itself leaves this off.
+  createNamespace: false
+
+# Single replica per service: this is a lab/demo environment, not
+# something that needs to survive a node failure without a blip - see
+# helm/taskflow/README.md.
+apiGateway:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 96Mi
+
+taskService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 192Mi
+
+postgres:
+  persistence:
+    enabled: true
+    # Small on purpose - a lab environment doesn't need much storage,
+    # and EBS-backed PVCs are billed per-GB provisioned regardless of
+    # use. Bump this if you're actually storing meaningful data.
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi

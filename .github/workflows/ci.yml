@@ -67,6 +67,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # This job only builds images locally (load: true) to scan them - it
+  # never pushes anywhere (push: false), so there is no registry and
+  # nothing here is ever deployed from. The Phase 4 GitOps flow this
+  # repo documents (see docs/gitops-architecture.md) is: build -> push to
+  # a real registry -> update helm/taskflow's image tag -> commit -> Git
+  # ArgoCD change is applied automatically -> ArgoCD reconciles it onto
+  # EKS - none of that is implemented here, since it needs a real
+  # registry and would start writing GitOps commits from CI. Doing that
+  # safely (e.g. GHCR + the built-in GITHUB_TOKEN, no long-lived
+  # credentials) is a documented next step, not silently faked here.
   build-images:
     name: Build Docker images
     runs-on: ubuntu-latest
@@ -74,12 +84,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Tagged with the commit SHA (in addition to the existing :ci tag,
+      # kept for continuity) so this already uses the same immutable,
+      # traceable tagging scheme a future push-to-registry step would
+      # need - never "latest". See docs/technology-decisions.md ("Why
+      # avoid latest image tags?").
       - name: Build api-gateway image
         uses: docker/build-push-action@v6
         with:
           context: services/api-gateway
           push: false
-          tags: taskflow/api-gateway:ci
+          tags: |
+            taskflow/api-gateway:ci
+            taskflow/api-gateway:${{ github.sha }}
           load: true
 
       - name: Build task-service image
@@ -87,12 +104,14 @@ jobs:
         with:
           context: services/task-service
           push: false
-          tags: taskflow/task-service:ci
+          tags: |
+            taskflow/task-service:ci
+            taskflow/task-service:${{ github.sha }}
           load: true
 
       - name: Scan images for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
-          image-ref: taskflow/task-service:ci
+          image-ref: taskflow/task-service:${{ github.sha }}
           severity: CRITICAL,HIGH
           exit-code: "0" # report only in Phase 1; tighten to fail the build in a later phase

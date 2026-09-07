@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "task-service") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "task-service") | nindent 4 }}
+spec:
+  # Deliberately hardcoded (not driven by a values field): task-service is
+  # an internal service reached only through api-gateway's proxy, and
+  # should never be reachable from outside the cluster. See
+  # helm/taskflow/README.md's "Services" section.
+  type: ClusterIP
+  selector:
+    {{- include "taskflow.selectorLabels" (dict "root" . "component" "task-service") | nindent 4 }}
+  ports:
+    - port: {{ .Values.taskService.service.port }}
+      targetPort: http
+      name: http

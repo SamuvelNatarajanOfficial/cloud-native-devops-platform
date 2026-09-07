@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "task-service") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "task-service") | nindent 4 }}
+spec:
+  replicas: {{ .Values.taskService.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "taskflow.selectorLabels" (dict "root" . "component" "task-service") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "taskflow.componentLabels" (dict "root" . "component" "task-service") | nindent 8 }}
+      {{- with .Values.taskService.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.taskService.securityContext.pod | nindent 8 }}
+      containers:
+        - name: task-service
+          image: "{{ .Values.taskService.image.repository }}:{{ .Values.taskService.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.taskService.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.taskService.securityContext.container | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.taskService.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "taskflow.componentFullname" (dict "root" . "component" "task-service") }}
+            - secretRef:
+                name: {{ .Values.taskService.database.existingSecret | default (include "taskflow.componentFullname" (dict "root" . "component" "task-service")) }}
+          # readiness = database connection actually usable right now;
+          # liveness = is the process itself still alive. Both endpoints
+          # already exist in Phase 1 - see
+          # services/task-service/app/main.py.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.taskService.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.taskService.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.taskService.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.taskService.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.taskService.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.taskService.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.taskService.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.taskService.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.taskService.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.taskService.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.taskService.resources | nindent 12 }}
+          {{- if .Values.taskService.securityContext.container.readOnlyRootFilesystem }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if .Values.taskService.securityContext.container.readOnlyRootFilesystem }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+      {{- with .Values.taskService.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.taskService.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.taskService.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

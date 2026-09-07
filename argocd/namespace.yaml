@@ -1,0 +1,12 @@
+# The namespace ArgoCD itself would run in - NOT applied automatically by
+# anything in this repository. See argocd/README.md for the official
+# ArgoCD installation method (which creates this namespace as part of the
+# documented `kubectl create namespace argocd` step) rather than this
+# repo embedding ArgoCD's own (large, frequently-updated) install
+# manifest.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/part-of: argocd
