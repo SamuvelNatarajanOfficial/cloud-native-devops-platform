@@ -110,7 +110,13 @@ jobs:
           load: true
 
       - name: Scan images for vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@v0.28.0
+        # v0.28.0-v0.30.0 pin their internal setup-trivy dependency to a
+        # tag (v0.2.1/v0.2.2) that's since been deleted upstream, which
+        # breaks action resolution entirely. v0.31.0+ pins that nested
+        # dependency by commit SHA instead, which can't go stale the same
+        # way - use the latest stable release rather than another
+        # tag-pinned older version.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: taskflow/task-service:${{ github.sha }}
           severity: CRITICAL,HIGH
