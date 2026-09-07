@@ -94,15 +94,39 @@ Scans the git history for accidentally committed secrets (API keys,
 credentials, private keys) — a real and common source of production
 incidents.
 
+## Infrastructure as Code (Phase 2)
+
+**Terraform**
+The standard IaC tool for AWS, with first-class provider support and wide
+industry adoption — a more relevant skill to demonstrate than a
+cloud-specific tool like CloudFormation/CDK for a portfolio meant to be
+cloud-agnostic in principle. Split into three modules (`vpc`, `iam`,
+`eks`) rather than one flat configuration, the same reasoning as
+splitting the application into gateway/backend services: a smaller,
+explicit interface per concern, reusable across environments. See
+[docs/aws-architecture.md](aws-architecture.md#why-terraform-modules).
+
+**EKS (Amazon Elastic Kubernetes Service)**
+A managed control plane means no time spent operating etcd/API-server
+availability — consistent with this project's principle of building real
+depth in the application/platform layers it controls (manifests, CI,
+IaC) rather than reinventing what a managed service already solves well.
+Worker nodes run as an EKS **managed node group** (AWS handles node
+provisioning/lifecycle/AMI patching triggers) rather than self-managed
+EC2 Auto Scaling groups, for the same reason.
+
+**IAM roles only — no IAM users or access keys**
+Every AWS identity Terraform creates here is a role assumed by an AWS
+service principal (`eks.amazonaws.com`, `ec2.amazonaws.com`), each with
+only the AWS-managed policies EKS documents as the minimum required. No
+long-lived access key exists anywhere in this configuration to leak.
+
 ## Reserved for later phases (not yet implemented)
 
-- **Terraform** — AWS infrastructure as code (VPC, EKS, RDS, IAM).
 - **Ansible** — configuration management for anything not natively
   Kubernetes-managed.
-- **EKS** — the managed Kubernetes target once Terraform exists to
-  provision it.
-- **ArgoCD** — GitOps-based continuous delivery once there's a cluster
-  and a Git-defined desired state to reconcile against.
+- **ArgoCD** — GitOps-based continuous delivery once there's a
+  Git-defined desired state to reconcile against the EKS cluster.
 - **Prometheus / Grafana / Loki / Alertmanager** — the observability
   stack; `task-service` already exposes `/metrics` in anticipation of
   this.

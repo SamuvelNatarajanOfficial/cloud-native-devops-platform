@@ -1,0 +1,38 @@
+# Copy this file to terraform.tfvars and adjust as needed:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored and must never be committed - not because
+# these particular values are secret (they aren't), but so nobody
+# accidentally commits real account-specific values (a locked-down
+# public_access_cidrs, a real Owner tag, etc.) over this template later.
+# The values below are examples only.
+
+aws_region   = "us-east-1"
+environment  = "dev"
+cluster_name = "taskflow"
+
+kubernetes_version = "1.31"
+
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# One shared NAT gateway instead of one per AZ - cheaper for a dev/demo
+# cluster. Set to false for production-grade AZ isolation.
+single_nat_gateway = true
+
+node_instance_types = ["t3.medium"]
+node_capacity_type  = "ON_DEMAND" # or "SPOT" to cut node cost further
+desired_node_count  = 2
+min_node_count      = 1
+max_node_count      = 3
+
+# Left open by default so `kubectl` works from anywhere without extra
+# setup. Restrict to your own IP/CIDR (e.g. ["203.0.113.4/32"]) once you
+# have a stable one, or set eks_endpoint_public_access = false entirely if
+# you'll only ever connect from inside the VPC (e.g. via a bastion/VPN).
+eks_endpoint_public_access = true
+eks_public_access_cidrs    = ["0.0.0.0/0"]
+
+tags = {
+  Owner = "your-name"
+}

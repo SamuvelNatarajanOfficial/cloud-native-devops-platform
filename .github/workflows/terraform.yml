@@ -1,0 +1,50 @@
+name: Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: terraform/environments/dev
+
+jobs:
+  validate:
+    name: fmt / init / validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Checked against the whole terraform/ tree (modules + environments),
+      # not just this job's working directory.
+      - name: terraform fmt -check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      # No AWS credentials are configured for this job, on purpose:
+      # `init` only needs to resolve providers/modules and `validate` is
+      # fully offline - neither talks to AWS. `terraform plan`/`apply` are
+      # deliberately NOT run in CI; they require real credentials and
+      # would touch real infrastructure from an automated job.
+      - name: terraform init
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate

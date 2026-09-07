@@ -15,13 +15,16 @@ secrets/
 kubeconfig*
 *.kubeconfig
 
-# --- Terraform (reserved for later phases) ---
+# --- Terraform ---
 *.tfstate
 *.tfstate.*
 *.tfvars
-!*.tfvars.example
+!terraform.tfvars.example
 .terraform/
-.terraform.lock.hcl
+crash.log
+crash.*.log
+# .terraform.lock.hcl is intentionally NOT ignored: it pins exact provider
+# versions and should be committed for reproducible `terraform init` runs.
 
 # --- Node ---
 node_modules/
