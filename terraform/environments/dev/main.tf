@@ -61,3 +61,51 @@ module "eks" {
 
   tags = local.common_tags
 }
+
+# --------------------------------------------------------------------------
+# Phase 6: IRSA role for the AWS Load Balancer Controller
+#
+# Reuses the OIDC provider the eks module above already registers - no new
+# OIDC provider, no IAM user, no long-lived access key. This role sits
+# unused (and free) until a real controller is actually installed and
+# configured to assume it via its ServiceAccount's
+# eks.amazonaws.com/role-arn annotation - see
+# networking/aws-load-balancer-controller/values-dev.yaml and
+# argocd/application-dev-aws-load-balancer-controller.yaml. Creating an
+# unused IAM role has no cost and no blast radius (it can't be assumed by
+# anything except the exact ServiceAccount named below), so - unlike the
+# dns module - this is instantiated unconditionally rather than gated
+# behind a toggle.
+# --------------------------------------------------------------------------
+module "aws_load_balancer_controller_irsa" {
+  source = "../../modules/irsa"
+
+  role_name            = "${local.name_prefix}-aws-load-balancer-controller"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_issuer_url      = module.eks.cluster_oidc_issuer_url
+  namespace            = "kube-system"
+  service_account_name = "aws-load-balancer-controller"
+  # The official policy AWS publishes for this exact controller version -
+  # fetched verbatim from
+  # https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v3.5.0/docs/install/iam_policy.json,
+  # not reconstructed by hand. Re-fetch this file (and bump the pinned
+  # version comment) if networking/aws-load-balancer-controller's own
+  # pinned version ever changes - see that chart's values file.
+  policy_json = file("${path.module}/policies/aws-load-balancer-controller-iam-policy.json")
+
+  tags = local.common_tags
+}
+
+# --------------------------------------------------------------------------
+# Phase 6: DNS / ACM - see this environment's enable_dns variable and
+# terraform/modules/dns/main.tf's own header comment for why this is off
+# by default.
+# --------------------------------------------------------------------------
+module "dns" {
+  count  = var.enable_dns ? 1 : 0
+  source = "../../modules/dns"
+
+  domain_name        = var.domain_name
+  create_hosted_zone = var.create_hosted_zone
+  tags               = local.common_tags
+}

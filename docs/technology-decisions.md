@@ -275,11 +275,98 @@ instead, the same zero-extra-setup approach already used for ArgoCD's own
 UI (see
 [argocd/README.md#installing-argocd](../argocd/README.md#installing-argocd)).
 
+## Networking, DNS, TLS & load balancing (Phase 6)
+
+**Why AWS ALB (via the AWS Load Balancer Controller) instead of an
+in-cluster ingress controller like NGINX?** An NGINX Ingress controller
+would itself need to run behind *something* internet-facing - typically a
+`LoadBalancer`-type Service, i.e. an AWS-provisioned Classic/Network Load
+Balancer anyway, plus an extra layer of routing/proxying this project
+would then have to operate and secure itself. The ALB approach lets AWS's
+own managed load balancer be the thing the Kubernetes `Ingress` resource
+configures directly - one less moving part to run, and one that
+integrates natively with ACM (certificate management) and target-group
+health checks without a second proxy layer translating between the two.
+NGINX remains the right choice when portability across cloud providers
+matters more than AWS-native integration - not the case for a project
+that already commits to EKS throughout.
+
+**Why TLS termination at the ALB, not at the Ingress/pod?** ACM issues
+certificates usable only by AWS services that integrate with it directly
+(ALB, CloudFront, etc.) - it never exposes the certificate's private key
+for use elsewhere. Terminating anywhere else would mean sourcing and
+rotating a certificate/key pair through some other mechanism entirely,
+reintroducing exactly the manual certificate-management burden ACM exists
+to remove. See
+[docs/networking-architecture.md#tls--acm](networking-architecture.md#tls--acm).
+
+**Why ACM specifically?** Free (for certificates used with integrated AWS
+services), auto-renewing (as long as its DNS validation records remain in
+place - see `terraform/modules/dns`), and requires no manual
+certificate-signing-request workflow. The alternative (Let's Encrypt via
+cert-manager running inside the cluster) is a legitimate choice too, but
+adds an entire additional controller and its own renewal/failure surface
+for a benefit (portability off AWS) this project doesn't need.
+
+**Why Route 53?** The only DNS provider that integrates with ACM's DNS
+validation and ALB alias records without any manual "copy this record
+into your DNS provider's UI" step - both `terraform/modules/dns`'s
+certificate validation and the optional ALB alias record are Terraform
+resources precisely because Route 53 supports managing them as such.
+
+**Why `ClusterIP` + Ingress instead of a `LoadBalancer` Service per
+component?** A `LoadBalancer` Service provisions its *own* separate load
+balancer per Service - three externally-reachable Services would mean
+three ELBs/NLBs, three TLS certificates, three DNS records, none
+coordinating with each other. One Ingress in front of one shared ALB
+centralizes TLS termination and routing into a single reviewable
+resource, and makes it structurally impossible to accidentally expose
+`task-service`/`postgres` externally, since neither has (or needs) its
+own externally-facing Service to misconfigure. See
+[docs/networking-architecture.md#kubernetes-service-exposure](networking-architecture.md#kubernetes-service-exposure).
+
+**Why IRSA for the AWS Load Balancer Controller?** The controller needs
+real AWS permissions (creating/modifying ALBs, target groups, security
+group rules) to do its job at all. IRSA scopes those permissions to
+exactly the one Kubernetes ServiceAccount that needs them - `sts:AssumeRoleWithWebIdentity`
+restricted by both `sub` (the exact `namespace:serviceaccount` pair) and
+`aud` conditions - rather than either the node's own IAM role (which
+every pod on that node could then implicitly use) or a long-lived IAM
+user access key. This reuses the OIDC provider `terraform/modules/eks`
+(Phase 2) already registers - Phase 6 adds a role, not a new trust
+mechanism. See `terraform/modules/irsa/main.tf`'s own comments for the
+exact trust-policy shape.
+
+**Why NetworkPolicy, and why disabled by default?** The policies
+themselves (`helm/taskflow/templates/networkpolicy.yaml`) are genuinely
+correct least-privilege rules for TaskFlow's actual traffic pattern - but
+a NetworkPolicy object has **no effect at all** unless the cluster's CNI
+enforces it, and the default Amazon VPC CNI does not without an
+explicitly-enabled configuration this Terraform doesn't set. Shipping
+this enabled by default would risk implying a security guarantee that
+might not actually hold on a given cluster - see
+[docs/networking-architecture.md#network-policies](networking-architecture.md#network-policies)
+for the full reasoning and how to verify enforcement before relying on
+it.
+
+**Why internal vs. public exposure is drawn where it is:** `api-gateway`
+is the only component with any path to the internet (via the Ingress);
+`task-service`, `postgres`, and the *entire* observability stack
+(Prometheus/Grafana/Loki/Alertmanager, Phase 5) stay on `ClusterIP` with
+no Ingress of their own, reachable only via `kubectl port-forward` for a
+human, or in-cluster Service DNS for another workload. Phase 6 introducing
+an external entry point for the application does not change this for
+anything else - see `argocd/networking-project.yaml`'s and
+`argocd/observability-project.yaml`'s separate, narrowly-scoped
+AppProjects, neither of which grants the other's Application any
+additional reach.
+
 ## Reserved for later phases (not yet implemented)
 
-- **api-gateway `/metrics` endpoint** — task-service is fully instrumented
-  (Phase 5); the Node/Express gateway is not yet - see
-  [observability/README.md#known-limitations](../observability/README.md#known-limitations).
+- **api-gateway `/metrics` endpoint** — now implemented (Phase 6, see
+  `services/api-gateway/src/app.js`); this bullet is kept only as a
+  pointer for anyone reading the Phase 5 summary's original "known
+  limitation" note.
 - **Jenkins concepts** — documented separately as a comparison to the
   GitHub Actions pipeline once CI/CD is more advanced.
 

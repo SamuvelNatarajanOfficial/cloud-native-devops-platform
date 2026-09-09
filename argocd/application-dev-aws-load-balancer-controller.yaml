@@ -1,0 +1,51 @@
+# ArgoCD Application for the AWS Load Balancer Controller. Same
+# multi-source pattern as the Phase 5 observability Applications (an
+# external Helm chart + a values-only source referencing this repo) - see
+# argocd/README.md#observability-applications for the full explanation of
+# why multi-source is needed at all.
+#
+# As with every other Application in this repo, applying this manifest
+# tells an already-installed ArgoCD to start reconciling it - it does not
+# install ArgoCD, and nothing in this repository applies it automatically.
+# Nothing here has been installed onto a real cluster in this phase - see
+# the Phase 6 implementation summary's "AWS changes" / "Runtime
+# validation" sections.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+spec:
+  project: networking
+
+  sources:
+    - repoURL: https://aws.github.io/eks-charts
+      chart: aws-load-balancer-controller
+      targetRevision: 3.5.0
+      helm:
+        releaseName: aws-load-balancer-controller
+        valueFiles:
+          - $values/networking/aws-load-balancer-controller/values-dev.yaml
+
+    - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # No CreateNamespace=true here: kube-system already exists on every
+    # real Kubernetes cluster - unlike taskflow/monitoring, this
+    # Application never needs to create its own namespace.
+    syncOptions: []
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

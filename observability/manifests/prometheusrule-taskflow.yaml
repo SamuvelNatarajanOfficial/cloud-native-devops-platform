@@ -99,6 +99,89 @@ spec:
             runbook_url: "docs/observability-runbook.md#3-high-latency"
 
     # -------------------------------------------------------------------
+    # Application-level: api-gateway's golden-signal metrics
+    # (services/api-gateway/src/app.js, added in Phase 6 - see
+    # docs/observability-architecture.md#golden-signals). Same four
+    # conditions as task-service above, deliberately not duplicated onto a
+    # shared/parameterized rule: api-gateway and task-service are
+    # different failure domains (a gateway failure means "nothing is
+    # reachable at all", not "task-service itself is degraded"), so they
+    # get separate alerts even though the underlying expressions rhyme.
+    # -------------------------------------------------------------------
+    - name: taskflow.application.gateway
+      rules:
+        - alert: ApiGatewayDown
+          expr: up{job="api-gateway"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "api-gateway is not being scraped by Prometheus."
+            description: >-
+              Prometheus has not successfully scraped api-gateway's
+              /metrics endpoint for at least 2 minutes. Because
+              api-gateway is TaskFlow's only externally-reachable
+              component (see docs/networking-architecture.md), this
+              usually means the entire application is unreachable from
+              outside the cluster, not just an internal component.
+            runbook_url: "docs/observability-runbook.md#1-application-is-down"
+
+        - alert: ApiGatewayHighErrorRate
+          expr: >-
+            sum(rate(api_gateway_http_requests_total{job="api-gateway", status_code=~"5.."}[5m]))
+            /
+            sum(rate(api_gateway_http_requests_total{job="api-gateway"}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "api-gateway is returning 5xx for more than 5% of requests."
+            description: >-
+              More than 5% of api-gateway requests over the last 5 minutes
+              resulted in a 5xx response - this includes both the
+              gateway's own errors and 5xx responses proxied through from
+              task-service. Compare against TaskServiceHighErrorRate to
+              tell which one is the actual source.
+            runbook_url: "docs/observability-runbook.md#2-high-http-error-rate"
+
+        - alert: ApiGatewayCriticalErrorRate
+          expr: >-
+            sum(rate(api_gateway_http_requests_total{job="api-gateway", status_code=~"5.."}[5m]))
+            /
+            sum(rate(api_gateway_http_requests_total{job="api-gateway"}[5m]))
+            > 0.25
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "api-gateway is returning 5xx for more than 25% of requests."
+            description: >-
+              Same condition as ApiGatewayHighErrorRate at a much higher
+              threshold - this is very unlikely to be a partial/transient
+              issue.
+            runbook_url: "docs/observability-runbook.md#2-high-http-error-rate"
+
+        - alert: ApiGatewayHighLatency
+          expr: >-
+            histogram_quantile(0.95,
+              sum(rate(api_gateway_http_request_duration_seconds_bucket{job="api-gateway"}[5m])) by (le)
+            ) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "api-gateway p95 request latency is above 1 second."
+            description: >-
+              95th percentile request latency across all routes (gateway
+              own routes + proxied /api/* traffic) has been above 1s for 5
+              minutes. Since api-gateway's own work per request is minimal
+              (a proxy hop), sustained high latency here usually reflects
+              task-service latency rather than the gateway itself -
+              compare against TaskServiceHighLatency.
+            runbook_url: "docs/observability-runbook.md#3-high-latency"
+
+    # -------------------------------------------------------------------
     # Kubernetes workload health: kube-state-metrics (object state), NOT
     # cAdvisor/container resource usage - see
     # docs/observability-architecture.md#what-kube-state-metrics-is-and-is-not.

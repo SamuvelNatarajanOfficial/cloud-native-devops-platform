@@ -51,6 +51,13 @@ spec:
       kind: Deployment
     - group: apps
       kind: StatefulSet
+    # Phase 6: helm/taskflow/templates/ingress.yaml (disabled by default -
+    # apiGateway.ingress.enabled: false). Whitelisted here regardless of
+    # that default, since AppProject membership is evaluated against what
+    # the chart CAN render, not today's values file - see
+    # docs/networking-architecture.md#terraform-vs-argocd-ownership.
+    - group: networking.k8s.io
+      kind: Ingress
 
   orphanedResources:
     warn: true

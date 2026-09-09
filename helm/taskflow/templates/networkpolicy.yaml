@@ -1,0 +1,165 @@
+{{- if .Values.global.networkPolicy.enabled }}
+# Disabled by default (global.networkPolicy.enabled: false) - see
+# values.yaml's own comment and
+# docs/networking-architecture.md#network-policies for the CNI-enforcement
+# caveat this depends on. Enabling this on a CNI that does NOT enforce
+# NetworkPolicy (the default Amazon VPC CNI, unless its NetworkPolicy
+# support is explicitly turned on, or an alternative like Calico is
+# installed) changes nothing at all - traffic keeps flowing exactly as
+# before, silently. Verify enforcement (e.g. deliberately test that a
+# denied connection actually fails) before relying on this for anything.
+#
+# Desired flow these three policies implement together:
+#   (ALB) -> api-gateway -> task-service -> postgres
+#   monitoring namespace -> api-gateway & task-service (/metrics only)
+# Every policy also explicitly allows DNS egress - a NetworkPolicy with
+# any Egress rule blocks ALL other egress by default, DNS included, which
+# is one of the most common ways a NetworkPolicy accidentally breaks a
+# workload rather than just securing it.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "api-gateway") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "api-gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "taskflow.selectorLabels" (dict "root" . "component" "api-gateway") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # From the ALB (via the AWS Load Balancer Controller's target-type: ip
+    # - traffic arrives at the pod IP directly from an ENI in the VPC, not
+    # from another pod, so this is necessarily an ipBlock rule rather than
+    # a podSelector one). Intentionally permissive: api-gateway is the
+    # application's public front door by design (see
+    # docs/networking-architecture.md) - restricting WHO reaches it is the
+    # ALB security group's job, not this NetworkPolicy's. What this
+    # NetworkPolicy actually protects is everything BEHIND api-gateway
+    # (see the task-service/postgres policies below).
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: {{ .Values.apiGateway.service.port }}
+    # Prometheus (any pod in the monitoring namespace - see
+    # docs/observability-architecture.md) scraping /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.global.networkPolicy.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.apiGateway.service.port }}
+  egress:
+    # To task-service - api-gateway's own /api/* proxy target (Phase 1).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "taskflow.selectorLabels" (dict "root" . "component" "task-service") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.taskService.service.port }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "task-service") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "task-service") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "taskflow.selectorLabels" (dict "root" . "component" "task-service") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # From api-gateway only - task-service is never reached any other way
+    # (see helm/taskflow/README.md's "Services" section: its Service type
+    # is hardcoded ClusterIP and it has no Ingress of its own).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "taskflow.selectorLabels" (dict "root" . "component" "api-gateway") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.taskService.service.port }}
+    # Prometheus scraping /metrics - same rationale as api-gateway's
+    # policy above.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.global.networkPolicy.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.taskService.service.port }}
+  egress:
+    # To postgres - task-service's own database connection (Phase 1).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "taskflow.selectorLabels" (dict "root" . "component" "postgres") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "postgres") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "taskflow.selectorLabels" (dict "root" . "component" "postgres") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    # From task-service only - never api-gateway directly, never anything
+    # outside the cluster (postgres's Service type is hardcoded ClusterIP
+    # with no Ingress - see helm/taskflow/README.md's "Services" section).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "taskflow.selectorLabels" (dict "root" . "component" "task-service") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+  egress:
+    # postgres never needs to initiate a connection anywhere except DNS
+    # (used internally by the postgres image's own entrypoint/tooling).
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

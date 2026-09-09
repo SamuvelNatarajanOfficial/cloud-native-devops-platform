@@ -1,0 +1,79 @@
+# A dedicated ArgoCD AppProject for cluster-level networking controllers -
+# currently just the AWS Load Balancer Controller. Separate from both
+# `taskflow` (application namespace, zero cluster-scoped resources) and
+# `observability` (monitoring namespace) for the same reason those two are
+# separate from each other: this workload runs in kube-system (a
+# cluster-critical namespace neither of the other two projects'
+# Applications may touch) and needs a genuinely different set of
+# cluster-scoped resources (webhook configurations, an IngressClass) that
+# would otherwise have to be added to some other project's whitelist for
+# no reason related to that project's own actual workload.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: networking
+  namespace: argocd
+spec:
+  description: >-
+    Cluster-level networking controllers (AWS Load Balancer Controller) -
+    deployed via GitOps, same pattern as the taskflow and observability
+    AppProjects, into kube-system.
+
+  sourceRepos:
+    - https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+    - https://aws.github.io/eks-charts
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+
+  # Verified empirically against `helm template --include-crds` output for
+  # the exact pinned chart version/values in this repo (see the Phase 6
+  # implementation summary's "Validation performed" section), not guessed:
+  #   - CustomResourceDefinition: IngressClassParams' own CRD definition
+  #   - ClusterRole / ClusterRoleBinding: the controller needs cluster-wide
+  #     read access to Ingresses/Services/EndpointSlices/Nodes across every
+  #     namespace to reconcile ALB target groups - the actual RBAC cost of
+  #     running an Ingress controller, not something this project could
+  #     scope down to a namespaced Role.
+  #   - MutatingWebhookConfiguration / ValidatingWebhookConfiguration: the
+  #     controller's own admission webhooks (e.g. defaulting/validating
+  #     Ingress and its own IngressClassParams/TargetGroupBinding CRDs).
+  #   - IngressClass: cluster-scoped by the Kubernetes API itself, not
+  #     specific to this controller.
+  #   - IngressClassParams: this controller's own CRD instance, created by
+  #     its chart (createIngressClassResource: true, its own default).
+  clusterResourceWhitelist:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: elbv2.k8s.aws
+      kind: IngressClassParams
+
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+
+  orphanedResources:
+    warn: true

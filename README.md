@@ -54,6 +54,8 @@ including health/readiness semantics and data model.
 | Packaging          | Helm (templated, environment-parameterized chart) |
 | GitOps delivery     | ArgoCD (not yet installed - see Phase 4 below)   |
 | Observability       | Prometheus, Grafana, Loki, Alertmanager, Grafana Alloy (not yet installed - see Phase 5 below) |
+| Load balancing / Ingress | AWS Load Balancer Controller + Kubernetes Ingress (not yet installed - see Phase 6 below) |
+| DNS / TLS          | Route 53, AWS Certificate Manager (not yet enabled - see Phase 6 below) |
 | CI/CD              | GitHub Actions                                 |
 | Security scanning  | hadolint, Trivy, gitleaks                      |
 
@@ -92,17 +94,16 @@ reasoning behind each choice.
 
 - Both services expose `/health` (liveness) and `/ready` (readiness)
   endpoints.
-- `task-service` exposes `/metrics` in Prometheus exposition format,
-  including golden-signal HTTP metrics (traffic/errors/latency) for every
-  route, added in Phase 5.
+- **Both** `task-service` and `api-gateway` expose `/metrics` in
+  Prometheus exposition format, with golden-signal HTTP metrics
+  (traffic/errors/latency) for every route - task-service since Phase 5,
+  api-gateway added in Phase 6.
 - A full Prometheus/Grafana/Loki/Alertmanager stack is configured under
   [observability/](observability/) and deployed via ArgoCD manifests under
-  [argocd/](argocd/) - three custom alert-severity groups, three Grafana
+  [argocd/](argocd/) - custom alert rules for both services, three Grafana
   dashboards, and a log pipeline via Grafana Alloy. **Configured and
   validated, not installed onto a real cluster** - see [Observability
   (Phase 5)](#observability-phase-5) below for exactly what that means.
-- `api-gateway` does not yet expose `/metrics` - a known limitation, see
-  [observability/README.md#known-limitations](observability/README.md#known-limitations).
 
 ## Local development instructions
 
@@ -530,6 +531,73 @@ full pipeline explanation.
   See
   [argocd/README.md#observability-applications](argocd/README.md#observability-applications).
 
+## Phase 6 — Networking, DNS, TLS & Load Balancing
+
+Production networking for TaskFlow: a Kubernetes `Ingress` fronted by the
+AWS Load Balancer Controller (an ALB), TLS via ACM, and DNS via Route 53
+- plus both services now fully instrumented for observability, and
+optional least-privilege `NetworkPolicy` objects. **This phase is
+statically validated (`terraform validate`, `helm lint`/`helm template`,
+`kubeconform` against real CRD schemas, `promtool check rules` - see the
+Phase 6 implementation summary for exact commands/results) but not
+deployed**: no ALB has been created, no DNS record resolves, no ACM
+certificate has been issued, and nothing has been applied to a real
+cluster. See [docs/networking-architecture.md](docs/networking-architecture.md)
+for the full diagrams and
+[docs/networking-troubleshooting-runbook.md](docs/networking-troubleshooting-runbook.md)
+for 17 troubleshooting procedures covering the external request path.
+
+### External request flow
+
+```
+Client --HTTPS--> Route 53 --alias--> ALB --TLS termination--> Ingress --> api-gateway --> task-service --> PostgreSQL
+```
+
+Only `api-gateway` is ever externally reachable; `task-service`,
+`postgres`, and the entire Phase 5 observability stack remain
+`ClusterIP`-only with no Ingress of their own - see
+[docs/networking-architecture.md#monitoring-stays-internal](docs/networking-architecture.md#monitoring-stays-internal).
+
+### What's new
+
+- **api-gateway metrics** (`services/api-gateway/src/app.js`): the same
+  golden-signal HTTP middleware pattern Phase 5 gave task-service, now on
+  both services - see [Observability (Phase 5)](#observability-phase-5)
+  above.
+- **`terraform/modules/irsa/`**: a generic IAM-Roles-for-Service-Accounts
+  module, reusing Phase 2's existing OIDC provider - its first consumer is
+  the AWS Load Balancer Controller's role, using AWS's own officially
+  published IAM policy (fetched verbatim, not hand-written).
+- **`terraform/modules/dns/`**: Route 53 + ACM certificate management -
+  disabled by default (`enable_dns = false`) since it needs a domain this
+  project doesn't actually own.
+- **`helm/taskflow`'s `apiGateway.ingress.*`**: an opt-in Ingress
+  (disabled by default), and **`global.networkPolicy.*`**: opt-in
+  least-privilege NetworkPolicies (disabled by default - see
+  [docs/networking-architecture.md#network-policies](docs/networking-architecture.md#network-policies)
+  for why: NetworkPolicy enforcement depends on the cluster's CNI, which
+  this project's default EKS setup does not guarantee).
+- **`networking/aws-load-balancer-controller/`** + `argocd/networking-project.yaml`
+  + `argocd/application-dev-aws-load-balancer-controller.yaml`: the
+  controller itself, deployed via the same multi-source ArgoCD pattern
+  Phase 5 established, into a dedicated `networking` AppProject scoped to
+  `kube-system`.
+
+### Security considerations
+
+- No AWS credentials, private keys, TLS keys, real certificate ARNs, real
+  domains, or real IPs anywhere in this repo - every example uses the
+  placeholder domain `api.taskflow.example.com` and placeholder ARNs.
+- IRSA only (no IAM user, no long-lived access key) for the AWS Load
+  Balancer Controller, using AWS's own least-privilege published policy.
+- ACM never exposes a private key to manage or accidentally commit - see
+  [docs/networking-architecture.md#tls--acm](docs/networking-architecture.md#tls--acm).
+- Two more narrowly-scoped ArgoCD AppProjects
+  (`argocd/networking-project.yaml`, extending `argocd/project.yaml`'s
+  whitelist by exactly one Kind for the now-possible Ingress), each
+  verified against actual `helm template --include-crds` output rather
+  than guessed.
+
 ## Future implementation phases
 
 - [x] **Phase 1 — Foundation**: application, Docker, docker-compose,
@@ -557,8 +625,14 @@ full pipeline explanation.
       [Observability (Phase 5)](#observability-phase-5) above). Validated
       with `helm template`/`promtool check rules`/`alloy validate` -
       nothing has been installed onto a real cluster.
-- [ ] **Phase 6 — Production concerns**: DNS, load balancing/ingress,
-      TLS, and a documented production-troubleshooting runbook.
+- [x] **Phase 6 — Production concerns**: DNS (Route 53), load
+      balancing/Ingress (AWS Load Balancer Controller + ALB), TLS (ACM),
+      optional NetworkPolicies, api-gateway golden-signal metrics, and a
+      17-scenario networking troubleshooting runbook (see
+      [Phase 6 — Networking, DNS, TLS & Load Balancing](#phase-6--networking-dns-tls--load-balancing)
+      above). Validated with `terraform validate`/`helm template`/`kubeconform`
+      - nothing has been installed onto a real cluster and no real domain
+      or certificate was used.
 
 ## Disclaimer
 

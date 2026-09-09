@@ -26,23 +26,23 @@ line throughout, the same way
 ```mermaid
 flowchart TB
     ts["task-service\n(FastAPI, /metrics)"]
-    ag["api-gateway\n(no /metrics yet - see\nobservability/README.md#known-limitations)"]
+    ag["api-gateway\n(Express, /metrics - added Phase 6)"]
     ne["prometheus-node-exporter\n(node CPU/memory/disk/network)"]
     ksm["kube-state-metrics\n(Kubernetes object state)"]
-    sm["ServiceMonitor\n(observability/manifests/servicemonitor-taskflow.yaml)"]
+    sm["ServiceMonitor\n(observability/manifests/servicemonitor-taskflow.yaml -\ncovers both services)"]
     prom["Prometheus\n(kube-prometheus-stack)"]
     rules["PrometheusRule\n(observability/manifests/prometheusrule-taskflow.yaml)"]
     am["Alertmanager"]
     graf["Grafana"]
 
     ts -->|scraped via| sm
+    ag -->|scraped via| sm
     sm --> prom
     ne -->|scraped via built-in\nServiceMonitor| prom
     ksm -->|scraped via built-in\nServiceMonitor| prom
     prom -->|evaluates| rules
     rules -->|firing alerts| am
     prom -->|queried by| graf
-    ag -.->|not yet instrumented| prom
 ```
 
 ## Logs flow
@@ -69,25 +69,32 @@ metrics - see `services/task-service/app/main.py`'s
 `record_request_metrics` middleware, added in this phase specifically to
 make this mapping real instead of partial):
 
-| Signal | TaskFlow metric | Query shape |
-|---|---|---|
-| **Traffic** | `task_service_http_requests_total` | `sum(rate(...[5m])) by (path)` |
-| **Errors** | `task_service_http_requests_total{status_code=~"5.."}` | 5xx / total ratio |
-| **Latency** | `task_service_http_request_duration_seconds_bucket` | `histogram_quantile(0.95, ...)` |
-| **Saturation** | `container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`, `kube_deployment_status_replicas_available` | resource usage + replica availability |
+| Signal | task-service metric | api-gateway metric | Query shape |
+|---|---|---|---|
+| **Traffic** | `task_service_http_requests_total` | `api_gateway_http_requests_total` | `sum(rate(...[5m])) by (path)` |
+| **Errors** | `task_service_http_requests_total{status_code=~"5.."}` | `api_gateway_http_requests_total{status_code=~"5.."}` | 5xx / total ratio |
+| **Latency** | `task_service_http_request_duration_seconds_bucket` | `api_gateway_http_request_duration_seconds_bucket` | `histogram_quantile(0.95, ...)` |
+| **Saturation** | `container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`, `kube_deployment_status_replicas_available` (both services, `namespace="taskflow"`) | | resource usage + replica availability |
 
-Before this phase, only `/health` and `/ready` were instrumented (a narrow
-`task_service_requests_total` counter covering two endpoints, not the
-actual `/tasks` CRUD routes) - meaning **traffic, errors, and latency for
-the application's real business endpoints did not exist as metrics at
-all**. The generic HTTP middleware added in this phase covers every route
-uniformly. See [observability/README.md#cardinality](../observability/README.md#cardinality)
-for why it labels by route *template* (`/tasks/{task_id}`) rather than
-resolved path.
+Before Phase 5, only task-service's `/health` and `/ready` were
+instrumented (a narrow `task_service_requests_total` counter covering two
+endpoints, not the actual `/tasks` CRUD routes) - meaning traffic, errors,
+and latency for the application's real business endpoints did not exist
+as metrics at all. Phase 5's generic HTTP middleware
+(`services/task-service/app/main.py`) covers every task-service route
+uniformly, labeled by route *template* (`/tasks/{task_id}`) rather than
+resolved path - see
+[observability/README.md#cardinality](../observability/README.md#cardinality).
 
-**api-gateway has no `/metrics` endpoint at all** - see [Known
-limitations](../observability/README.md#known-limitations). Its `/health`
-and `/ready` endpoints (Phase 1) are unaffected by this phase.
+**api-gateway** had no `/metrics` endpoint at all through Phase 5; Phase 6
+added the same golden-signal shape to it
+(`services/api-gateway/src/app.js`'s equivalent middleware). Because
+api-gateway proxies to task-service without Express route definitions of
+its own for those upstream routes, it uses a *best-effort* path-template
+heuristic instead (collapsing UUID/numeric path segments to `:id`) rather
+than reading a true route template - see that file's own comment for why
+the two services' instrumentation isn't identical even though the metric
+shapes match.
 
 ## What kube-state-metrics is (and isn't)
 

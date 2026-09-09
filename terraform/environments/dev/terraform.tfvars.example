@@ -36,3 +36,8 @@ eks_public_access_cidrs    = ["0.0.0.0/0"]
 tags = {
   Owner = "your-name"
 }
+
+# --- Phase 6: DNS / ACM - off by default, see variables.tf's own comment ---
+# enable_dns         = true
+# domain_name        = "api.taskflow.example.com"  # a domain you actually own
+# create_hosted_zone = false                        # true only if this project should own the zone outright

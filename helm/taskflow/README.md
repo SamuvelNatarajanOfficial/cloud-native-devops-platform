@@ -38,6 +38,8 @@ helm/taskflow/
 │   ├── api-gateway-deployment.yaml / -service.yaml
 │   ├── task-service-deployment.yaml / -service.yaml
 │   ├── postgres-statefulset.yaml / -service.yaml
+│   ├── ingress.yaml           # Phase 6, opt-in (apiGateway.ingress.enabled) - see docs/networking-architecture.md
+│   ├── networkpolicy.yaml     # Phase 6, opt-in (global.networkPolicy.enabled) - see docs/networking-architecture.md#network-policies
 │   └── NOTES.txt              # printed after install/upgrade
 └── README.md                  # this file
 ```
@@ -77,6 +79,29 @@ covers the ones most worth understanding.
 | `postgres.auth.password` | `"changeme-dev-only"` | **Dev-only placeholder** — see [Secrets](#secrets) |
 | `postgres.auth.existingSecret` | `""` | Name of a pre-created Secret with `POSTGRES_USER`/`POSTGRES_PASSWORD` keys |
 | `postgres.persistence.enabled` / `.size` | `true` / `1Gi` | PVC via `volumeClaimTemplates` — see [PostgreSQL](#postgresql) |
+| `apiGateway.ingress.enabled` | `false` | Phase 6 external Ingress/ALB — see [Ingress](#ingress) below |
+| `global.networkPolicy.enabled` | `false` | Phase 6 least-privilege NetworkPolicies — see [Network policies](#network-policies) below |
+
+### Ingress
+
+Off by default (`apiGateway.ingress.enabled: false`) — turning it on
+requires a real ACM certificate ARN (`apiGateway.ingress.certificateArn`)
+and a domain you actually control (`apiGateway.ingress.host`), neither of
+which this portfolio project has. See
+[docs/networking-architecture.md#ingress](../../docs/networking-architecture.md#ingress)
+for the full annotation set and reasoning, and
+[terraform/modules/dns](../../terraform/modules/dns) for how a real
+certificate ARN would actually be produced.
+
+### Network policies
+
+Off by default (`global.networkPolicy.enabled: false`) — the policies in
+`templates/networkpolicy.yaml` are genuinely correct least-privilege
+rules, but have **no effect at all** unless the cluster's CNI enforces
+NetworkPolicy, which the default Amazon VPC CNI does not without
+additional configuration this project doesn't set. See
+[docs/networking-architecture.md#network-policies](../../docs/networking-architecture.md#network-policies)
+before enabling this on a real cluster.
 
 ### Namespace handling
 

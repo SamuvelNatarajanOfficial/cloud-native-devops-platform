@@ -9,6 +9,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@prometheus-io/client": "^0.16.1",
     "express": "^4.21.0",
     "helmet": "^7.1.0",
     "http-proxy-middleware": "^3.0.3",

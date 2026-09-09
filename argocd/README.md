@@ -18,6 +18,8 @@ argocd/
 ├── application-dev-observability-kube-prometheus-stack.yaml   # Prometheus + Grafana + Alertmanager (Phase 5)
 ├── application-dev-observability-loki.yaml                    # Loki (Phase 5)
 ├── application-dev-observability-alloy.yaml                   # Grafana Alloy, the log collector (Phase 5)
+├── networking-project.yaml                                    # AppProject scoping the Application below, into kube-system (Phase 6)
+├── application-dev-aws-load-balancer-controller.yaml           # AWS Load Balancer Controller (Phase 6)
 └── README.md                                                 # this file
 ```
 
@@ -296,6 +298,30 @@ configuration in this repo depends on predictable Service DNS names
 derived from the release name - e.g. Grafana's Loki datasource URL
 (`http://loki-gateway.monitoring.svc.cluster.local`) only resolves
 correctly if the Loki chart's release is actually named `loki`.
+
+## Networking Application (Phase 6)
+
+`aws-load-balancer-controller` (in a dedicated `networking` AppProject -
+see [networking-project.yaml](networking-project.yaml)) follows the exact
+same multi-source pattern as the observability Applications above (chart
+source + values-ref source), so see [Multi-source
+Applications](#multi-source-applications) for the mechanics. What's
+different here:
+
+- **Destination is `kube-system`**, not `taskflow` or `monitoring` -
+  this controller is cluster infrastructure, not part of either the
+  application or the monitoring stack, so it gets its own AppProject
+  rather than widening either existing one's permissions.
+- **No `CreateNamespace=true`** - unlike `taskflow-dev`/the observability
+  Applications, `kube-system` already exists on every cluster.
+- **Its IRSA role comes from Terraform** (`terraform/modules/irsa`, via
+  `terraform/environments/dev/main.tf`), not from anything ArgoCD
+  manages - see
+  [docs/networking-architecture.md#terraform-vs-argocd-ownership](../docs/networking-architecture.md#terraform-vs-argocd-ownership)
+  for exactly where the Terraform/ArgoCD ownership line falls.
+
+See [docs/networking-architecture.md](../docs/networking-architecture.md)
+for the full architecture this Application is part of.
 
 ## How this fits with Helm/Terraform
 

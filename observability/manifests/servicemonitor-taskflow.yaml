@@ -1,7 +1,13 @@
-# ServiceMonitor for task-service's existing /metrics endpoint
-# (services/task-service/app/main.py - unchanged by this phase except for
-# the golden-signal HTTP metrics added alongside it, see
-# docs/observability-architecture.md#golden-signals).
+# ServiceMonitor for TaskFlow's /metrics endpoints. Originally
+# task-service only (Phase 5); Phase 6 broadened the selector to
+# `app.kubernetes.io/part-of: taskflow` instead of naming task-service
+# specifically, since api-gateway now exposes the same
+# golden-signal-shaped /metrics endpoint on the same Service port name
+# ("http") - see services/api-gateway/src/app.js and
+# docs/observability-architecture.md#golden-signals. One ServiceMonitor
+# now covers both Services; PostgreSQL's Service is unaffected (its port
+# is named "postgres", not "http", so it never matches the endpoint below,
+# and it has no /metrics endpoint to scrape regardless).
 #
 # Why a ServiceMonitor instead of a static Prometheus scrape_configs entry:
 # a static config would need Prometheus's own config reloaded (a
@@ -24,37 +30,37 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: taskflow-task-service
+  name: taskflow
   namespace: monitoring
   labels:
-    app.kubernetes.io/name: taskflow-task-service
+    app.kubernetes.io/name: taskflow
     app.kubernetes.io/part-of: taskflow
 spec:
-  # task-service's own Service (helm/taskflow/templates/task-service-service.yaml)
-  # lives in the "taskflow" namespace, not "monitoring" where this
+  # Both Services (helm/taskflow/templates/{api-gateway,task-service}-service.yaml)
+  # live in the "taskflow" namespace, not "monitoring" where this
   # ServiceMonitor and Prometheus itself live - namespaceSelector is what
-  # lets Prometheus look cross-namespace for the Service to discover.
+  # lets Prometheus look cross-namespace for the Services to discover.
   # By default Prometheus Operator sets the `job` label from the Service's
-  # own metadata.name - which for this chart is "<release>-task-service"
+  # own metadata.name - which for this chart is "<release>-<component>"
   # (see helm/taskflow's taskflow.componentFullname helper), i.e. it would
   # change if the Helm release were ever renamed. Setting jobLabel instead
-  # reads `job` from this fixed label value, so every alert rule and
-  # dashboard query below can reliably use job="task-service" regardless of
-  # release name.
+  # reads `job` from EACH matched Service's own app.kubernetes.io/name
+  # label, so alert rules and dashboard queries reliably get
+  # job="task-service" and job="api-gateway" (not a single hardcoded
+  # value) regardless of release name.
   jobLabel: app.kubernetes.io/name
   namespaceSelector:
     matchNames:
       - taskflow
   selector:
     matchLabels:
-      app.kubernetes.io/name: task-service
       app.kubernetes.io/part-of: taskflow
   endpoints:
-    - port: http # matches the Service's named port (see task-service-service.yaml)
+    - port: http # matches both Services' named port (see *-service.yaml) - postgres's port is named "postgres", so it never matches
       path: /metrics
       # 15s (this chart's own scrape-interval default) is frequent enough
       # to make the golden-signal dashboards responsive without generating
-      # excessive sample volume for a service this size - see
+      # excessive sample volume for services this size - see
       # docs/observability-architecture.md#golden-signals.
       interval: 15s
       scrapeTimeout: 10s

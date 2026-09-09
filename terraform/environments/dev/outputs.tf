@@ -53,3 +53,23 @@ output "configure_kubectl" {
   description = "Command to update your local kubeconfig to point at this cluster."
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "oidc_provider_arn" {
+  description = "ARN of the IAM OIDC provider registered for this cluster (for any future IRSA role beyond the one this phase already wires up)."
+  value       = module.eks.oidc_provider_arn
+}
+
+output "aws_load_balancer_controller_role_arn" {
+  description = "IRSA role ARN for the AWS Load Balancer Controller - set this as networking/aws-load-balancer-controller's values-dev.yaml serviceAccount.annotations[\"eks.amazonaws.com/role-arn\"]."
+  value       = module.aws_load_balancer_controller_irsa.role_arn
+}
+
+output "dns_certificate_arn" {
+  description = "ACM certificate ARN from the dns module, if enable_dns = true - set this as helm/taskflow's apiGateway.ingress.certificateArn. Empty when enable_dns = false (the default)."
+  value       = var.enable_dns ? module.dns[0].certificate_arn : ""
+}
+
+output "dns_zone_id" {
+  description = "Route 53 hosted zone ID from the dns module, if enable_dns = true. Empty when enable_dns = false (the default)."
+  value       = var.enable_dns ? module.dns[0].zone_id : ""
+}

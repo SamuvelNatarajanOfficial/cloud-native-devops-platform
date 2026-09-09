@@ -1,0 +1,64 @@
+{{- if .Values.apiGateway.ingress.enabled }}
+# Disabled by default (apiGateway.ingress.enabled: false) - see
+# values.yaml's own comment and docs/networking-architecture.md. Requires
+# the AWS Load Balancer Controller to already be installed (see
+# networking/aws-load-balancer-controller/) and a real, validated ACM
+# certificate (apiGateway.ingress.certificateArn) - neither is assumed
+# here, and this template renders nothing unless explicitly enabled.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "taskflow.componentFullname" (dict "root" . "component" "api-gateway") }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "taskflow.componentLabels" (dict "root" . "component" "api-gateway") | nindent 4 }}
+  annotations:
+    # internet-facing (not "internal"): this Ingress is the application's
+    # actual public entry point - see docs/networking-architecture.md.
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # ip (not "instance"): the ALB targets pod IPs directly (via the VPC
+    # CNI), matching this chart's ClusterIP Services exactly - no NodePort
+    # is ever allocated. See docs/technology-decisions.md.
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # Redirect any plain-HTTP request straight to HTTPS at the ALB itself,
+    # before it ever reaches the cluster - see
+    # docs/networking-architecture.md#tls--acm.
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.apiGateway.ingress.certificateArn | quote }}
+    # TLS terminates AT the ALB (see docs/networking-architecture.md#tls--acm)
+    # - traffic from the ALB to the pod is plain HTTP, same as every other
+    # health check and proxy hop already inside this cluster.
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.apiGateway.ingress.healthCheckPath }}
+    alb.ingress.kubernetes.io/success-codes: "200"
+    {{- with .Values.apiGateway.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # Explicit ingressClassName (not the older kubernetes.io/ingress.class
+  # annotation) - see docs/technology-decisions.md. "alb" is created
+  # automatically by the AWS Load Balancer Controller's own Helm chart
+  # (createIngressClassResource: true, its own default) - not defined
+  # anywhere in this repo.
+  ingressClassName: {{ .Values.apiGateway.ingress.className }}
+  rules:
+    - host: {{ .Values.apiGateway.ingress.host }}
+      http:
+        paths:
+          # Everything routes to api-gateway ONLY - task-service is never
+          # given its own Ingress rule/path here. api-gateway's existing
+          # /api/* proxy (services/api-gateway/src/app.js, Phase 1) is
+          # still what actually reaches task-service - this Ingress adds
+          # an external entry point in front of the same internal routing
+          # that already existed, it doesn't replace it. See
+          # docs/networking-architecture.md#internal-service-communication.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "taskflow.componentFullname" (dict "root" . "component" "api-gateway") }}
+                port:
+                  number: {{ .Values.apiGateway.service.port }}
+{{- end }}

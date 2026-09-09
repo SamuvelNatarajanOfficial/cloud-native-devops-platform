@@ -1,7 +1,7 @@
 {
   "title": "TaskFlow Overview",
   "uid": "taskflow-overview",
-  "description": "Golden signals for task-service (traffic, errors, latency), pod availability, resource usage, and a log-exploration panel. Every query here uses a metric or log label that actually exists - see docs/observability-architecture.md#golden-signals and services/task-service/app/main.py.",
+  "description": "Golden signals for both api-gateway and task-service (traffic, errors, latency), pod availability, resource usage, and a log-exploration panel. Every query here uses a metric or log label that actually exists - see docs/observability-architecture.md#golden-signals, services/api-gateway/src/app.js, and services/task-service/app/main.py.",
   "schemaVersion": 39,
   "version": 1,
   "editable": true,
@@ -26,8 +26,13 @@
       "targets": [
         {
           "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m])) by (path)",
-          "legendFormat": "{{path}}",
+          "legendFormat": "task-service {{path}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(api_gateway_http_requests_total{job=\"api-gateway\"}[5m])) by (path)",
+          "legendFormat": "api-gateway {{path}}",
+          "refId": "B"
         }
       ]
     },
@@ -51,8 +56,13 @@
       "targets": [
         {
           "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\", status_code=~\"5..\"}[5m])) / sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m]))",
-          "legendFormat": "5xx ratio",
+          "legendFormat": "task-service 5xx ratio",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(api_gateway_http_requests_total{job=\"api-gateway\", status_code=~\"5..\"}[5m])) / sum(rate(api_gateway_http_requests_total{job=\"api-gateway\"}[5m]))",
+          "legendFormat": "api-gateway 5xx ratio",
+          "refId": "B"
         }
       ]
     },
@@ -66,13 +76,23 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
-          "legendFormat": "p50 {{path}}",
+          "legendFormat": "task-service p50 {{path}}",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
-          "legendFormat": "p95 {{path}}",
+          "legendFormat": "task-service p95 {{path}}",
           "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(api_gateway_http_request_duration_seconds_bucket{job=\"api-gateway\"}[5m])) by (le, path))",
+          "legendFormat": "api-gateway p50 {{path}}",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(api_gateway_http_request_duration_seconds_bucket{job=\"api-gateway\"}[5m])) by (le, path))",
+          "legendFormat": "api-gateway p95 {{path}}",
+          "refId": "D"
         }
       ]
     },

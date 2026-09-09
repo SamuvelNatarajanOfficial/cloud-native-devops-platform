@@ -21,6 +21,23 @@ global:
   # images this chart references by default.
   imagePullSecrets: []
 
+  # Phase 6: least-privilege NetworkPolicies for api-gateway/task-service/
+  # postgres (see templates/networkpolicy.yaml). Disabled by default -
+  # NetworkPolicy objects have NO EFFECT AT ALL unless the cluster's CNI
+  # actually enforces them (the default Amazon VPC CNI does not, unless
+  # its NetworkPolicy support is explicitly enabled, or an alternative
+  # like Calico is installed) - see
+  # docs/networking-architecture.md#network-policies. Enabling this on a
+  # non-enforcing CNI is silently a no-op, not a security improvement;
+  # verify enforcement before relying on it.
+  networkPolicy:
+    enabled: false
+    # Namespace Prometheus runs in (see observability/README.md) - allowed
+    # ingress to api-gateway's/task-service's /metrics port. Matched via
+    # the kubernetes.io/metadata.name label every namespace gets
+    # automatically since Kubernetes 1.21.
+    monitoringNamespace: monitoring
+
 apiGateway:
   replicaCount: 2
 
@@ -32,9 +49,43 @@ apiGateway:
     tag: ""
     pullPolicy: IfNotPresent
 
+  # Deliberately ClusterIP (not LoadBalancer): api-gateway is reached
+  # through the Ingress below, which provisions ONE shared ALB for the
+  # whole application - a LoadBalancer-type Service here would instead
+  # provision its own SEPARATE ELB per Service, one more load balancer to
+  # pay for and secure per Service instead of one Ingress in front of
+  # everything. See docs/networking-architecture.md#kubernetes-service-exposure.
   service:
     type: ClusterIP
     port: 8080
+
+  # Phase 6: external HTTPS entry point via the AWS Load Balancer
+  # Controller (see networking/aws-load-balancer-controller/ and
+  # docs/networking-architecture.md). Disabled by default - turning this
+  # on requires a real ACM certificate (certificateArn) and a domain
+  # you actually control (host), neither of which this portfolio project
+  # has. See values-prod.yaml for a filled-in example and
+  # helm/taskflow/README.md#ingress for the exact steps.
+  ingress:
+    enabled: false
+    className: alb
+    host: "api.taskflow.example.com"
+    # ARN of an ACM certificate already validated for `host` above (e.g.
+    # the dns Terraform module's certificate_arn output) - see
+    # docs/networking-architecture.md#tls--acm. Left empty on purpose;
+    # never a real ARN in this repo.
+    certificateArn: ""
+    # /health (Phase 1's liveness endpoint) - see
+    # docs/networking-architecture.md#ingress for why the ALB's own
+    # health check reuses this instead of a separate check.
+    healthCheckPath: /health
+    # Merged into the Ingress's own annotations, on top of the
+    # alb.ingress.kubernetes.io/* set templates/ingress.yaml already
+    # hardcodes (scheme, target-type, listen-ports, ssl-redirect,
+    # certificate-arn, healthcheck-*) - use this for anything
+    # environment-specific, e.g. alb.ingress.kubernetes.io/group.name to
+    # share one ALB across multiple Ingress objects.
+    annotations: {}
 
   # Portfolio/lab defaults, not load-tested numbers - see
   # helm/taskflow/README.md.

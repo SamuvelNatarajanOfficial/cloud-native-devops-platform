@@ -102,3 +102,30 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# --------------------------------------------------------------------------
+# Phase 6: DNS / ACM (see terraform/modules/dns and
+# docs/networking-architecture.md#dns--route-53). Off by default - every
+# resource the dns module creates needs a domain this project doesn't
+# actually own, so `terraform plan`/`apply` against it would either fail
+# (no such domain/zone) or require real AWS + a real domain to mean
+# anything. `enable_dns = false` keeps `terraform validate`/`plan` fully
+# safe with the placeholder default below.
+# --------------------------------------------------------------------------
+variable "enable_dns" {
+  description = "Instantiate the dns module (Route 53 + ACM certificate for domain_name). Left false by default - see this variable group's own header comment."
+  type        = bool
+  default     = false
+}
+
+variable "domain_name" {
+  description = "Placeholder domain for the dns module - NOT a real, owned domain. Only meaningful when enable_dns = true. See docs/networking-architecture.md."
+  type        = string
+  default     = "api.taskflow.example.com"
+}
+
+variable "create_hosted_zone" {
+  description = "Passed through to the dns module - see terraform/modules/dns/variables.tf."
+  type        = bool
+  default     = false
+}

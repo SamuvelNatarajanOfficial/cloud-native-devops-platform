@@ -179,19 +179,22 @@ principle the root README already states for the EKS cluster itself.
   exposed publicly**. Reaching any of them (e.g. Grafana's UI) would go
   through `kubectl port-forward`, the same zero-extra-setup approach
   [argocd/README.md](../argocd/README.md#installing-argocd) already uses
-  for ArgoCD itself. A future phase could add an Ingress with TLS and real
-  authentication (see the root README's Phase 6) - not implemented here.
+  for ArgoCD itself. Phase 6 added an Ingress/ALB/TLS - deliberately only
+  for `api-gateway` (see
+  [docs/networking-architecture.md](../docs/networking-architecture.md)) -
+  not for this monitoring stack, which stays internal-only by design (see
+  that document's own explicit statement that introducing external
+  ingress for the application must not incidentally expose monitoring).
 - **No public repo, no committed secret:** see [Secrets](#secrets) above.
 
 ## Known limitations
 
-- **api-gateway has no `/metrics` endpoint.** This phase instruments
-  task-service only - see
+- ~~api-gateway has no `/metrics` endpoint~~ - **resolved in Phase 6**: see
+  `services/api-gateway/src/app.js` and
   [docs/observability-architecture.md#golden-signals](../docs/observability-architecture.md#golden-signals).
-  Adding equivalent metrics to the Node/Express gateway (a `prom-client`
-  dependency + middleware, mirroring task-service's approach) is a
-  reasonable next increment, deliberately left out here to keep this
-  phase's application change small and focused.
+  Kept here (struck through) rather than deleted, since other files
+  written during Phase 5 still describe this as an open limitation at the
+  time.
 - **TaskFlow's ServiceMonitor/PrometheusRule live outside `helm/taskflow/`**,
   in `observability/manifests/` instead - see
   `servicemonitor-taskflow.yaml`'s own header comment. A more mature
