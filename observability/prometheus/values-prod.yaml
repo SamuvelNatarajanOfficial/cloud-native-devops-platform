@@ -1,0 +1,102 @@
+# A documented configuration EXAMPLE for a production-style deployment of
+# kube-prometheus-stack - like helm/taskflow/values-prod.yaml, this is
+# NOT deployed by anything in this repo (there is no
+# application-prod-observability-*.yaml under argocd/ - see
+# argocd/README.md's "There is deliberately no application-prod.yaml"
+# convention, applied the same way here). It exists to show what would
+# actually change for production, and why, without pretending any of it
+# has been tested against a real cluster.
+#
+# Only the values that would actually differ from values-dev.yaml are
+# listed below - everything else stays the same.
+
+prometheusOperator:
+  # Re-enabled here (disabled in dev - see values-dev.yaml's comment).
+  # Requires either cert-manager or accepting the Job-based self-signed
+  # cert bootstrap this chart can do on its own - decide that deliberately
+  # rather than copying this flag alone.
+  admissionWebhooks:
+    enabled: true
+
+prometheus:
+  prometheusSpec:
+    # A real retention window - long enough to compare "this week vs. last
+    # week" and to have enough history when investigating an incident that
+    # isn't caught immediately. 15d is a starting point, not a rule - the
+    # right number depends on compliance requirements, how far back
+    # postmortems typically need to look, and storage budget (this is
+    # cost, not just correctness - see observability/README.md#cost).
+    retention: 15d
+
+    # Dev has no storageSpec (ephemeral emptyDir - data lost on restart).
+    # Production needs a real PersistentVolumeClaim so a Prometheus pod
+    # restart doesn't erase weeks of history.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          # "" = the cluster's default StorageClass (e.g. EKS's gp3
+          # default) - same convention as helm/taskflow's
+          # postgres.persistence.storageClassName.
+          storageClassName: ""
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+    resources:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits: { cpu: "1", memory: 4Gi }
+
+    # 2 replicas: Prometheus Operator runs each as an independent,
+    # non-clustered instance scraping the same targets - this is
+    # availability during a node/pod failure, not deduplication (a
+    # production setup typically also needs Alertmanager to dedupe
+    # identical alerts fired by both, which Alertmanager already does by
+    # default via its own clustering below).
+    replicas: 2
+
+alertmanager:
+  alertmanagerSpec:
+    replicas: 3 # Alertmanager's own gossip-based clustering wants an odd number.
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ""
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+  # A REAL receiver needs a real secret (a Slack webhook URL, PagerDuty
+  # integration key, etc.) - never inline it in a values file. This
+  # chart's documented pattern is `alertmanager.secrets`: a list of
+  # pre-created Secret names whose contents get mounted into the
+  # Alertmanager pod, referenced from `config.receivers[].*_configs` via
+  # an `*_url_file` / `*_file` pointing at the mounted path, e.g.:
+  #
+  #   alertmanager:
+  #     secrets:
+  #       - alertmanager-slack-webhook   # created out-of-band:
+  #                                      # kubectl create secret generic alertmanager-slack-webhook \
+  #                                      #   -n monitoring --from-literal=url='<real webhook URL>'
+  #     config:
+  #       receivers:
+  #         - name: "critical-placeholder"
+  #           slack_configs:
+  #             - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhook/url
+  #               channel: "#taskflow-alerts"
+  #
+  # Left as documentation, not applied here - see values-dev.yaml's
+  # deliberately no-op placeholder receivers for what actually ships.
+
+grafana:
+  persistence:
+    enabled: true
+    size: 5Gi
+  replicas: 2
+  admin:
+    # Same existingSecret pattern as values-dev.yaml, just a different
+    # (still pre-created out-of-band, still never committed) Secret name -
+    # production credentials should never be the same value as a lab
+    # environment's.
+    existingSecret: "grafana-admin-credentials-prod"

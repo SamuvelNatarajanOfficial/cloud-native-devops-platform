@@ -1,0 +1,134 @@
+{
+  "title": "TaskFlow Overview",
+  "uid": "taskflow-overview",
+  "description": "Golden signals for task-service (traffic, errors, latency), pod availability, resource usage, and a log-exploration panel. Every query here uses a metric or log label that actually exists - see docs/observability-architecture.md#golden-signals and services/task-service/app/main.py.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["taskflow", "portfolio", "golden-signals"],
+  "templating": {
+    "list": [
+      { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0 },
+      { "name": "loki_datasource", "type": "datasource", "query": "loki", "current": {}, "hide": 0 }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Traffic - request rate by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m])) by (path)",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Errors - 5xx ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.05 },
+            { "color": "red", "value": 0.25 }
+          ]}
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\", status_code=~\"5..\"}[5m])) / sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m]))",
+          "legendFormat": "5xx ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Latency - p50 / p95 by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
+          "legendFormat": "p50 {{path}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
+          "legendFormat": "p95 {{path}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Saturation - pod availability",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "kube_deployment_spec_replicas{namespace=\"taskflow\"}",
+          "legendFormat": "{{deployment}} desired",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_deployment_status_replicas_available{namespace=\"taskflow\"}",
+          "legendFormat": "{{deployment}} available",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Saturation - container CPU/memory usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"taskflow\"}[5m])) by (pod)",
+          "legendFormat": "{{pod}} CPU cores",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"taskflow\"}) by (pod)",
+          "legendFormat": "{{pod}} memory bytes",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "TaskFlow logs (api-gateway + task-service)",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+      "options": { "showTime": true, "wrapLogMessages": true },
+      "targets": [
+        {
+          "expr": "{namespace=\"taskflow\"}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

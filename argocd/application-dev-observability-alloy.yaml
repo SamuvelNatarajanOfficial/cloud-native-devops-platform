@@ -1,0 +1,44 @@
+# ArgoCD Application for Grafana Alloy (the log collector - see
+# observability/alloy/README.md for why Alloy rather than Promtail). Same
+# multi-source pattern as the other two observability Applications - see
+# application-dev-observability-kube-prometheus-stack.yaml's comments.
+#
+# Not installed onto a real cluster in this phase - see the Phase 5
+# implementation summary.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-alloy
+  namespace: argocd
+spec:
+  project: observability
+
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: 1.12.1
+      helm:
+        releaseName: alloy
+        valueFiles:
+          - $values/observability/alloy/values-dev.yaml
+
+    - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

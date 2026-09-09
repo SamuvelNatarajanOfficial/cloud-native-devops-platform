@@ -11,10 +11,14 @@ actually do it.
 
 ```
 argocd/
-├── namespace.yaml         # the "argocd" namespace ArgoCD itself runs in
-├── project.yaml            # a dedicated AppProject scoping what taskflow-dev can touch
-├── application-dev.yaml     # the Application - points at helm/taskflow + values-dev.yaml
-└── README.md                # this file
+├── namespace.yaml                                          # the "argocd" namespace ArgoCD itself runs in
+├── project.yaml                                             # AppProject scoping what taskflow-dev can touch
+├── application-dev.yaml                                      # the Application - points at helm/taskflow + values-dev.yaml
+├── observability-project.yaml                                # AppProject scoping the 3 Applications below (Phase 5)
+├── application-dev-observability-kube-prometheus-stack.yaml   # Prometheus + Grafana + Alertmanager (Phase 5)
+├── application-dev-observability-loki.yaml                    # Loki (Phase 5)
+├── application-dev-observability-alloy.yaml                   # Grafana Alloy, the log collector (Phase 5)
+└── README.md                                                 # this file
 ```
 
 There is deliberately no `application-prod.yaml` — `values-prod.yaml` is
@@ -216,6 +220,82 @@ argocd app delete taskflow-dev --cascade
 # Or declaratively:
 kubectl delete -f argocd/application-dev.yaml
 ```
+
+## Observability Applications (Phase 5)
+
+Three more Applications, `observability-kube-prometheus-stack`,
+`observability-loki`, and `observability-alloy` (plus their own
+`observability` AppProject - see
+[observability-project.yaml](observability-project.yaml)), deploy the
+monitoring stack under the same GitOps pattern as `taskflow-dev` above.
+See [observability/README.md](../observability/README.md) and
+[docs/observability-architecture.md](../docs/observability-architecture.md)
+for what's actually in that stack - this section only covers what's
+different about *how* these three Applications are structured.
+
+### Multi-source Applications
+
+`taskflow-dev` above has a single `source:` because everything it needs
+(the chart *and* its values) lives in this one repository. The
+observability Applications instead deploy a chart hosted in a **different**
+Git-based Helm repository entirely (e.g.
+`https://prometheus-community.github.io/helm-charts`) while still wanting
+their values to live in *this* repo, version-controlled the same way as
+everything else. ArgoCD's `sources:` (plural) list, with a `ref: values`
+source contributing no manifests of its own, is exactly the mechanism for
+this:
+
+```yaml
+sources:
+  - repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 90.0.0
+    helm:
+      valueFiles:
+        - $values/observability/prometheus/values-dev.yaml
+  - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+    targetRevision: main
+    ref: values
+```
+
+`$values/<path>` in the first source's `valueFiles` resolves against
+whichever other source in the same list declared `ref: values` - that's
+what lets an externally-hosted chart use a values file version-controlled
+in this repo instead of being inlined into the Application manifest
+itself (which would make the values file un-reviewable as a normal PR
+diff against the rest of this repo).
+
+The `observability-kube-prometheus-stack` Application adds a **third**
+source - the same repo again, this time with `path:
+observability/manifests` and no `ref:` - for the plain Kubernetes
+manifests (TaskFlow's ServiceMonitor, its PrometheusRule, and the Grafana
+dashboard ConfigMaps) that aren't part of the Helm chart at all. ArgoCD
+applies a directory-type source's manifests verbatim, which is why that
+directory contains *only* valid Kubernetes objects - a Helm values file
+sitting in the same path would fail to parse as one.
+
+### A dedicated `observability` AppProject
+
+`taskflow`'s AppProject (`project.yaml`) intentionally allows **zero**
+cluster-scoped resources. The observability stack genuinely needs some
+(`CustomResourceDefinition` for the Prometheus Operator's CRDs;
+`ClusterRole`/`ClusterRoleBinding` for cluster-wide scrape-target
+discovery) - rather than loosening the `taskflow` project's own
+restrictions to accommodate a completely different workload,
+`observability-project.yaml` defines a **separate** AppProject scoped to
+exactly what these three Applications need, verified empirically against
+`helm template --include-crds` output (see the Phase 5 implementation
+summary), not guessed.
+
+### Pinned Helm release names
+
+Each observability Application sets `helm.releaseName` explicitly
+(`kube-prometheus-stack`, `loki`, `alloy`) rather than letting ArgoCD
+default to the Application's own name. This matters because other
+configuration in this repo depends on predictable Service DNS names
+derived from the release name - e.g. Grafana's Loki datasource URL
+(`http://loki-gateway.monitoring.svc.cluster.local`) only resolves
+correctly if the Loki chart's release is actually named `loki`.
 
 ## How this fits with Helm/Terraform
 

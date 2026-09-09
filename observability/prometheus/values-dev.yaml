@@ -1,0 +1,189 @@
+# kube-prometheus-stack values for the "dev"/lab environment - same naming
+# convention as helm/taskflow/values-dev.yaml and terraform/environments/dev.
+#
+# Chart: prometheus-community/kube-prometheus-stack
+# Pinned version: 90.0.0 (verified current at the time this file was
+# written - see observability/README.md#versions for how to check for a
+# newer one and why this is pinned rather than left to float).
+# Bundles: Prometheus Operator v0.93.1, Grafana (subchart) 13.2.2,
+# kube-state-metrics 8.4.2, prometheus-node-exporter 4.56.3, Alertmanager.
+#
+# Deploy (see argocd/application-dev-observability-kube-prometheus-stack.yaml
+# for how ArgoCD actually applies this - nothing here has been installed
+# onto a real cluster in this phase):
+#   helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --version 90.0.0 -n monitoring --create-namespace \
+#     -f observability/prometheus/values-dev.yaml
+
+# ---------------------------------------------------------------------------
+# Prometheus Operator
+# ---------------------------------------------------------------------------
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+  # Disabled for the dev/lab environment: the Operator's admission webhooks
+  # validate PrometheusRule/AlertmanagerConfig objects on the fly, but need
+  # a TLS cert (normally auto-provisioned via a Job + patch, or cert-manager)
+  # and two more cluster-scoped resources (ValidatingWebhookConfiguration,
+  # MutatingWebhookConfiguration). That's real complexity for a single-tenant
+  # lab cluster where a syntactically-broken PrometheusRule is caught by
+  # `promtool check rules` in CI anyway (see .github/workflows - this phase's
+  # local validation used the same tool manually, see the Phase 5 summary).
+  # Enable this in a real multi-team cluster - see values-prod.yaml.
+  admissionWebhooks:
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# Prometheus itself
+# ---------------------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    # Dev/lab retention: short and ephemeral (no storageSpec below, so this
+    # chart's default emptyDir is used) - Prometheus's TSDB is lost on pod
+    # restart. That's an acceptable tradeoff for a portfolio/lab environment
+    # demonstrating the monitoring stack itself, NOT for anything where
+    # historical metrics matter - see values-prod.yaml for a persistent,
+    # longer-retention configuration and observability/README.md#retention
+    # for the full reasoning (compliance/cost/troubleshooting tradeoffs).
+    retention: 24h
+
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { cpu: 500m, memory: 1Gi }
+
+    # These three flags are the actual mechanism that lets Prometheus
+    # discover ServiceMonitors/PodMonitors/PrometheusRules created OUTSIDE
+    # kube-prometheus-stack's own Helm release - specifically, TaskFlow's
+    # own ServiceMonitor/PrometheusRule (deployed by a completely separate
+    # Helm chart/ArgoCD Application - see helm/taskflow/ and
+    # observability/manifests/). Without this, Prometheus's default
+    # behavior (serviceMonitorSelectorNilUsesHelmValues: true) restricts
+    # discovery to resources labeled with THIS release's own name, and
+    # TaskFlow's ServiceMonitor would be silently ignored.
+    #
+    # Tradeoff: `false` here means Prometheus watches ServiceMonitors,
+    # PodMonitors, and PrometheusRules in EVERY namespace, not just ones
+    # labeled for this release. That's the right default for a single-team
+    # lab cluster (this whole repo, one project); a shared multi-tenant
+    # cluster would instead scope this with serviceMonitorNamespaceSelector
+    # / a matching release label, so one team can't accidentally get another
+    # team's workload scraped/alerted on without review.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+# ---------------------------------------------------------------------------
+# Alertmanager
+# ---------------------------------------------------------------------------
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 100m, memory: 128Mi }
+
+  # Routing/grouping/inhibition, configured entirely via values (no separate
+  # Secret needed for THIS part - only a real receiver's webhook URL/token
+  # would need one, see observability/README.md#alerting). Every receiver
+  # below is a safe, no-op placeholder: it names a route but configures no
+  # delivery channel (no slack_configs/webhook_configs/email_configs), so
+  # this file has nothing sensitive in it and nothing to leak.
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      receiver: "null"
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        # Critical alerts: shorter repeat interval, would go to a paging
+        # receiver (PagerDuty/Opsgenie/phone) in a real deployment.
+        - receiver: "critical-placeholder"
+          matchers:
+            - severity = "critical"
+          repeat_interval: 1h
+        # Warnings: longer repeat interval, would go to a non-paging
+        # channel (Slack/email) in a real deployment.
+        - receiver: "warning-placeholder"
+          matchers:
+            - severity = "warning"
+
+    receivers:
+      - name: "null"
+      - name: "critical-placeholder"
+      - name: "warning-placeholder"
+
+    # If a critical alert is already firing for a given alertname+namespace,
+    # suppress the matching warning-level alert for the same thing - e.g.
+    # don't page AND separately notify about "high error rate" when
+    # "service down" (a more specific, more severe condition) already fired
+    # for the same service. See docs/observability-runbook.md#alerting
+    # for the general alerting philosophy this reflects.
+    inhibit_rules:
+      - source_matchers:
+          - severity = "critical"
+        target_matchers:
+          - severity = "warning"
+        equal: ["alertname", "namespace"]
+
+# ---------------------------------------------------------------------------
+# Grafana (bundled subchart)
+# ---------------------------------------------------------------------------
+grafana:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+  # No persistent volume in dev: dashboards are provisioned declaratively
+  # from Git (via the sidecar below), so losing ad-hoc UI edits/annotations
+  # on a pod restart is an acceptable lab tradeoff. See values-prod.yaml.
+  persistence:
+    enabled: false
+
+  # Never a plaintext admin password in Git (same existingSecret pattern as
+  # helm/taskflow's postgres.auth.existingSecret - see
+  # helm/taskflow/README.md#secrets). This Secret is NOT created by
+  # anything in this repo; create it out-of-band before installing:
+  #   kubectl create secret generic grafana-admin-credentials \
+  #     -n monitoring \
+  #     --from-literal=admin-user=admin \
+  #     --from-literal=admin-password='<a real password, not this one>'
+  admin:
+    existingSecret: "grafana-admin-credentials"
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # Auto-discovers dashboard ConfigMaps labeled grafana_dashboard: "1"
+  # anywhere in the cluster (see observability/manifests/grafana-dashboards-configmaps.yaml)
+  # and loads them into Grafana - no dashboard JSON is baked into this
+  # values file. searchNamespace: ALL because dashboards for a workload
+  # (TaskFlow) may reasonably live outside Grafana's own "monitoring"
+  # namespace; a shared multi-tenant cluster would scope this down.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+  # Prometheus + Alertmanager datasources are provisioned automatically by
+  # this chart already; Loki is the one datasource this chart doesn't know
+  # about, added here explicitly. URL uses the Loki chart's "gateway"
+  # Service - see observability/loki/values-dev.yaml and
+  # argocd/application-dev-observability-loki.yaml's pinned
+  # `helm.releaseName: loki` (which is what makes this exact DNS name
+  # predictable: "<releaseName>-gateway").
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      isDefault: false
+      jsonData:
+        maxLines: 1000

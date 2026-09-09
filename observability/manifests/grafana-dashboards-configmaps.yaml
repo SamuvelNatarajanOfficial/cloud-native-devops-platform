@@ -1,0 +1,434 @@
+# Grafana dashboard ConfigMaps, auto-discovered by the Grafana sidecar
+# (observability/prometheus/values-dev.yaml's grafana.sidecar.dashboards -
+# watches for the "grafana_dashboard: \"1\"" label cluster-wide) and loaded
+# into Grafana with no manual import step. Each `data` block below is the
+# exact content of the sibling JSON file under
+# observability/grafana/dashboards/ - regenerate after editing a dashboard:
+#
+#   kubectl create configmap taskflow-overview-dashboard \\
+#     --from-file=taskflow-overview.json=observability/grafana/dashboards/taskflow-overview.json \\
+#     -n monitoring --dry-run=client -o yaml
+#
+# (same pattern for kubernetes-overview.json / node-overview.json), then
+# re-add the "grafana_dashboard: \"1\"" label this file adds below.
+---
+apiVersion: v1
+data:
+  taskflow-overview.json: |
+    {
+      "title": "TaskFlow Overview",
+      "uid": "taskflow-overview",
+      "description": "Golden signals for task-service (traffic, errors, latency), pod availability, resource usage, and a log-exploration panel. Every query here uses a metric or log label that actually exists - see docs/observability-architecture.md#golden-signals and services/task-service/app/main.py.",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "timezone": "browser",
+      "time": { "from": "now-1h", "to": "now" },
+      "refresh": "30s",
+      "tags": ["taskflow", "portfolio", "golden-signals"],
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0 },
+          { "name": "loki_datasource", "type": "datasource", "query": "loki", "current": {}, "hide": 0 }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Traffic - request rate by route",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m])) by (path)",
+              "legendFormat": "{{path}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Errors - 5xx ratio",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 0.05 },
+                { "color": "red", "value": 0.25 }
+              ]}
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(task_service_http_requests_total{job=\"task-service\", status_code=~\"5..\"}[5m])) / sum(rate(task_service_http_requests_total{job=\"task-service\"}[5m]))",
+              "legendFormat": "5xx ratio",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Latency - p50 / p95 by route",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
+              "legendFormat": "p50 {{path}}",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(task_service_http_request_duration_seconds_bucket{job=\"task-service\"}[5m])) by (le, path))",
+              "legendFormat": "p95 {{path}}",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Saturation - pod availability",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "kube_deployment_spec_replicas{namespace=\"taskflow\"}",
+              "legendFormat": "{{deployment}} desired",
+              "refId": "A"
+            },
+            {
+              "expr": "kube_deployment_status_replicas_available{namespace=\"taskflow\"}",
+              "legendFormat": "{{deployment}} available",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Saturation - container CPU/memory usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"taskflow\"}[5m])) by (pod)",
+              "legendFormat": "{{pod}} CPU cores",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"taskflow\"}) by (pod)",
+              "legendFormat": "{{pod}} memory bytes",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "TaskFlow logs (api-gateway + task-service)",
+          "type": "logs",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+          "datasource": { "type": "loki", "uid": "${loki_datasource}" },
+          "options": { "showTime": true, "wrapLogMessages": true },
+          "targets": [
+            {
+              "expr": "{namespace=\"taskflow\"}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  name: taskflow-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: taskflow
+---
+apiVersion: v1
+data:
+  kubernetes-overview.json: |
+    {
+      "title": "Kubernetes Overview",
+      "uid": "kubernetes-overview",
+      "description": "Cluster-wide Kubernetes object state (kube-state-metrics) and container resource usage (cAdvisor, via kubelet) - not scoped to any one namespace. See docs/observability-architecture.md#what-kube-state-metrics-is-and-is-not for the distinction between the two data sources this dashboard mixes.",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "timezone": "browser",
+      "time": { "from": "now-1h", "to": "now" },
+      "refresh": "30s",
+      "tags": ["kubernetes", "portfolio"],
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0 },
+          {
+            "name": "namespace",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(kube_namespace_status_phase, namespace)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Pods per namespace",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "count(kube_pod_info{namespace=~\"$namespace\"}) by (namespace)",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Deployment replicas: desired vs. available",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "kube_deployment_spec_replicas{namespace=~\"$namespace\"}",
+              "legendFormat": "{{namespace}}/{{deployment}} desired",
+              "refId": "A"
+            },
+            {
+              "expr": "kube_deployment_status_replicas_available{namespace=~\"$namespace\"}",
+              "legendFormat": "{{namespace}}/{{deployment}} available",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Pod container restarts (rate)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[15m])) by (namespace, pod)",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Pods not Ready",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(kube_pod_status_ready{namespace=~\"$namespace\", condition=\"true\"} == 0) by (namespace, pod)",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Container CPU usage by namespace",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\"}[5m])) by (namespace)",
+              "legendFormat": "{{namespace}} CPU cores",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Container memory usage by namespace",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\"}) by (namespace)",
+              "legendFormat": "{{namespace}} memory",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  name: kubernetes-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: taskflow
+---
+apiVersion: v1
+data:
+  node-overview.json: |
+    {
+      "title": "Node / Infrastructure Overview",
+      "uid": "node-overview",
+      "description": "Host-level resource usage from prometheus-node-exporter (CPU, memory, filesystem, network) - the Kubernetes-node equivalent of what Ansible's node_exporter role (ansible/roles/node_exporter/) provides for a standalone Linux server. See docs/observability-architecture.md#node-monitoring-two-different-mechanisms for why these are two separate mechanisms, not one.",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "timezone": "browser",
+      "time": { "from": "now-1h", "to": "now" },
+      "refresh": "30s",
+      "tags": ["node", "infrastructure", "portfolio"],
+      "templating": {
+        "list": [
+          { "name": "datasource", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0 },
+          {
+            "name": "instance",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(node_uname_info, instance)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true,
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "CPU usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]}
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100)",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Memory usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 75 },
+                { "color": "red", "value": 90 }
+              ]}
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "(1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"})) * 100",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Filesystem free space",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "yellow", "value": 10 },
+                { "color": "green", "value": 20 }
+              ]}
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "expr": "(node_filesystem_avail_bytes{instance=~\"$instance\", fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{instance=~\"$instance\", fstype!~\"tmpfs|overlay\"}) * 100",
+              "legendFormat": "{{instance}} {{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Network I/O",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "rate(node_network_receive_bytes_total{instance=~\"$instance\", device!=\"lo\"}[5m])",
+              "legendFormat": "{{instance}} {{device}} rx",
+              "refId": "A"
+            },
+            {
+              "expr": "rate(node_network_transmit_bytes_total{instance=~\"$instance\", device!=\"lo\"}[5m])",
+              "legendFormat": "{{instance}} {{device}} tx",
+              "refId": "B"
+            }
+          ]
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  name: node-overview-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: taskflow

@@ -28,6 +28,12 @@ crash.*.log
 
 # --- Ansible ---
 *.retry
+# Local ansible-galaxy collections cache - created when ansible-lint/
+# ansible-galaxy is run with ANSIBLE_HOME defaulting to the cwd (e.g. via
+# a container with -v ./ansible:/ansible -w /ansible). Disposable, never
+# intentional - see ansible/requirements.yml for the actual pinned
+# collection list this cache would otherwise duplicate.
+.ansible/
 # Real inventory values (a copy of an inventory/**/hosts.yml with your
 # actual server address/hostname filled in) - see ansible/inventory/README.md.
 # No leading path component on purpose: this needs to match at any depth

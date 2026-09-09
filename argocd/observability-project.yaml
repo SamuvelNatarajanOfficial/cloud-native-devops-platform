@@ -1,0 +1,88 @@
+# A dedicated ArgoCD AppProject for the observability stack, separate from
+# the `taskflow` AppProject (project.yaml) - same reasoning as that
+# project's own header comment: scoping down what an Application CAN touch
+# means a misconfigured Application can't accidentally target a different
+# cluster, namespace, or resource kind. This project is broader than
+# `taskflow`'s (it needs real cluster-scoped permissions - see below) which
+# is exactly why it's kept separate rather than widening the app project
+# every other Application already uses.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: observability
+  namespace: argocd
+spec:
+  description: >-
+    Observability stack (kube-prometheus-stack, Loki, Alloy) - deployed via
+    GitOps, same as the taskflow AppProject, but into the "monitoring"
+    namespace and requiring some cluster-scoped resources the taskflow
+    project deliberately disallows.
+
+  # Every remote Helm chart repository used by an Application in this
+  # project, plus this Git repo itself (for the values files and the plain
+  # manifests under observability/manifests/). Replace with your own fork's
+  # URL if you're not SamuvelNatarajanOfficial - see argocd/README.md.
+  sourceRepos:
+    - https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+
+  # Only the in-cluster API server, and only the "monitoring" namespace -
+  # same single-cluster, single-namespace-per-project pattern as
+  # project.yaml.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+
+  # Cluster-scoped resources kube-prometheus-stack and Alloy genuinely
+  # create, and ONLY those - verified empirically with `helm template
+  # --include-crds` against the exact pinned chart versions/values in this
+  # repo (see the Phase 5 implementation summary's "Validation performed"
+  # section for the exact commands), not guessed:
+  #   - CustomResourceDefinition: the Prometheus Operator's CRDs
+  #     (Prometheus, Alertmanager, ServiceMonitor, PrometheusRule, etc.)
+  #   - ClusterRole / ClusterRoleBinding: the Operator, node-exporter
+  #     DaemonSet, and kube-state-metrics all need cluster-wide READ
+  #     access to discover targets - this is the actual RBAC cost of
+  #     running a cluster-monitoring stack, not something this project
+  #     could reasonably scope down to namespace-only Roles.
+  # This project deliberately does NOT allow a Namespace resource here -
+  # the "monitoring" namespace is created via each Application's own
+  # CreateNamespace=true syncOption instead, same pattern as
+  # project.yaml/application-dev.yaml (see that file's own comment for why).
+  clusterResourceWhitelist:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+  # Every namespaced Kind the three Applications in this project actually
+  # render (same empirical verification as above) - not a blanket "*".
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: DaemonSet
+    - group: apps
+      kind: StatefulSet
+    - group: monitoring.coreos.com
+      kind: Prometheus
+    - group: monitoring.coreos.com
+      kind: Alertmanager
+    - group: monitoring.coreos.com
+      kind: PrometheusRule
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+
+  orphanedResources:
+    warn: true

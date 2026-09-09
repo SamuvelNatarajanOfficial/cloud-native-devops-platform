@@ -1,0 +1,110 @@
+# Loki values for the "dev"/lab environment.
+#
+# Chart: grafana/loki, pinned version: 7.3.0 (verified current at the time
+# this file was written - see observability/README.md#versions).
+#
+# Deploy (see argocd/application-dev-observability-loki.yaml for how ArgoCD
+# actually applies this - not installed onto a real cluster in this phase):
+#   helm install loki grafana/loki --version 7.3.0 -n monitoring \
+#     --create-namespace -f observability/loki/values-dev.yaml
+
+# SingleBinary ("monolithic") mode: Loki runs as one component instead of
+# separate read/write/backend targets (SimpleScalable, the chart default)
+# or a full microservices split (Distributed). SimpleScalable/Distributed
+# both REQUIRE real object storage (S3/GCS/etc.) - appropriate at genuine
+# scale, not for a portfolio lab environment. SingleBinary is the chart's
+# own documented choice for "small installs... up to a few tens of GB/day",
+# which is exactly this project's scale. See observability/loki/README.md.
+deploymentMode: SingleBinary
+
+loki:
+  # Single tenant (this whole lab cluster, one project) - real per-tenant
+  # auth would matter on a shared multi-tenant Loki, not here.
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  storage:
+    type: filesystem
+
+  limits_config:
+    # Dev/lab retention: short, and explicitly NOT a production-appropriate
+    # value - see observability/loki/README.md#retention for what a real
+    # retention period would depend on (compliance, storage cost,
+    # troubleshooting window).
+    retention_period: 168h # 7 days
+
+  compactor:
+    retention_enabled: true
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# This chart's read/write/backend components (the "SimpleScalable" target)
+# default to 3 replicas each REGARDLESS of `deploymentMode` - the chart
+# refuses to render (a deliberate validate.yaml guard) unless they're
+# explicitly zeroed out when using SingleBinary mode instead.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# No object storage backend for a filesystem-storage dev deployment - see
+# `loki.storage.type: filesystem` above.
+minio:
+  enabled: false
+
+gateway:
+  enabled: true
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+
+# The canary continuously writes and reads back a test log line to verify
+# the write path end-to-end - a useful production signal, but one more
+# moving DaemonSet a lab environment doesn't need. See
+# observability/loki/README.md. `test.enabled` (this chart's `helm test`
+# hook) is disabled alongside it - it hard-requires the canary and would
+# otherwise fail chart rendering entirely (`helm template`/`helm install`),
+# not just `helm test`.
+lokiCanary:
+  enabled: false
+
+test:
+  enabled: false
+
+monitoring:
+  # Let kube-prometheus-stack's Prometheus scrape Loki's own /metrics via a
+  # ServiceMonitor - Loki monitoring itself, same mechanism as everything
+  # else in this project (see observability/prometheus/values-dev.yaml's
+  # serviceMonitorSelectorNilUsesHelmValues: false, which is what makes
+  # Prometheus notice a ServiceMonitor from yet another separate chart).
+  serviceMonitor:
+    enabled: true
+  # Deprecated Grafana-Agent-Operator-based self-scraping - superseded by
+  # the ServiceMonitor above; left off to avoid an unmaintained dependency.
+  selfMonitoring:
+    enabled: false
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false

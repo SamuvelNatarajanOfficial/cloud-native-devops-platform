@@ -198,11 +198,88 @@ out-of-band, e.g. via `kubectl create secret`), while everything that
 *is* safe to version — the chart, the values files, which Secret name to
 reference — stays in Git.
 
+## Observability (Phase 5)
+
+**Why Prometheus?**
+The de facto standard metrics system for Kubernetes-native workloads, with
+a query language (PromQL) expressive enough for everything from a simple
+rate to the `histogram_quantile` calculations this project's latency
+alerts use, and Kubernetes-native service discovery (`ServiceMonitor`)
+that means no scrape target is ever a hardcoded IP - see
+[docs/observability-architecture.md](observability-architecture.md).
+
+**Why Grafana?**
+The visualization layer every one of these tools already assumes as its
+companion - Prometheus, Loki, and Alertmanager all either ship a
+Grafana-compatible datasource by default or (Alertmanager) are queried by
+Grafana's own alerting UI. Using anything else would mean maintaining a
+second, less-integrated visualization tool for no real benefit.
+
+**Why Loki?**
+Loki indexes only a small set of **labels** (namespace, pod, container,
+app - see
+[observability/README.md#cardinality](../observability/README.md#cardinality)),
+not full log text - dramatically cheaper to run than a full-text-indexed
+system (the ELK/OpenSearch model) for a project whose actual log query
+pattern is "show me this pod/namespace's logs around this time," not
+free-text search across everything ever logged. It also shares Grafana as
+its query UI, rather than introducing a second dashboarding tool.
+
+**Why Alertmanager?**
+Deduplication, grouping, and routing are a genuinely separate concern from
+*detecting* a condition (Prometheus's job) - Alertmanager is what turns
+"this expression became true" into "one grouped notification to the right
+receiver, not five identical ones," and what makes inhibition (suppressing
+a less-severe alert once a more-severe one for the same underlying problem
+is already firing) possible at all. Bundled with Prometheus by the same
+kube-prometheus-stack chart, rather than a separate integration to wire up.
+
+**Why Kubernetes-native service discovery (ServiceMonitor)?**
+A static Prometheus `scrape_configs` entry needs Prometheus's own config
+reloaded every time a target changes. A `ServiceMonitor` is a Kubernetes
+object the Prometheus Operator watches continuously - Prometheus's scrape
+config regenerates automatically from whatever Services currently match
+its label selector, the same reconciliation model ArgoCD itself uses for
+GitOps. See
+[observability/manifests/servicemonitor-taskflow.yaml](../observability/manifests/servicemonitor-taskflow.yaml)'s
+own header comment.
+
+**Why separate metrics and logs (Prometheus+Loki, not one system)?**
+Metrics are small, structured, and cheap to keep at high cardinality-per-series
+for months; logs are large, unstructured, and expensive to fully
+index for anywhere near that long. Prometheus's storage engine is built
+around the first workload, Loki's around the second (index labels only,
+keep the actual log text cheap in object/file storage) - a single system
+optimized for both would necessarily compromise on one.
+
+**Why GitOps for observability, same as the application?**
+The monitoring stack is infrastructure a real team would want the exact
+same guarantees for that Phase 4 already established for the application:
+a full audit trail of every alerting-threshold or dashboard change (a
+reviewable Git commit, not an ad-hoc `kubectl edit` against a live
+Alertmanager config), and drift correction if someone changes something
+directly against the cluster. See
+[argocd/README.md#observability-applications](../argocd/README.md#observability-applications)
+for the multi-source Application pattern this required (an externally
+hosted Helm chart, with values that still live in - and are reviewed as
+part of - this Git repo).
+
+**Why avoid public exposure by default?**
+Prometheus, Alertmanager, Loki, and Grafana all default to `ClusterIP` -
+none are reachable outside the cluster. Exposing Grafana or Prometheus's
+own UI publicly without authentication in front of it is a common way a
+monitoring stack becomes its own security incident (dashboards and raw
+metrics both leak information about what's running and how it's
+configured); this project reaches them via `kubectl port-forward`
+instead, the same zero-extra-setup approach already used for ArgoCD's own
+UI (see
+[argocd/README.md#installing-argocd](../argocd/README.md#installing-argocd)).
+
 ## Reserved for later phases (not yet implemented)
 
-- **Prometheus / Grafana / Loki / Alertmanager** — the observability
-  stack; `task-service` already exposes `/metrics` in anticipation of
-  this.
+- **api-gateway `/metrics` endpoint** — task-service is fully instrumented
+  (Phase 5); the Node/Express gateway is not yet - see
+  [observability/README.md#known-limitations](../observability/README.md#known-limitations).
 - **Jenkins concepts** — documented separately as a comparison to the
   GitHub Actions pipeline once CI/CD is more advanced.
 

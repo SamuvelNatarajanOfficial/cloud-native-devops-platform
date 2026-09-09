@@ -1,0 +1,137 @@
+# Grafana Alloy values for the "dev"/lab environment - this is the log
+# collector: it tails container logs on every node and ships them to Loki.
+#
+# Chart: grafana/alloy, pinned version: 1.12.1 (verified current at the
+# time this file was written - see observability/README.md#versions).
+#
+# Why Alloy and not Promtail: Promtail (the historical Loki-ecosystem log
+# collector, and what most older tutorials still show) has been in
+# maintenance-only mode since Grafana Labs' own deprecation announcement,
+# with Grafana Alloy as its official, actively-developed replacement. Using
+# Promtail here would mean building on a component Grafana itself is moving
+# users away from - see observability/alloy/README.md for the full
+# reasoning and observability/README.md#versions.
+#
+# Deploy (see argocd/application-dev-observability-alloy.yaml for how
+# ArgoCD actually applies this - not installed onto a real cluster in this
+# phase):
+#   helm install alloy grafana/alloy --version 1.12.1 -n monitoring \
+#     --create-namespace -f observability/alloy/values-dev.yaml
+
+# controller.type already defaults to "daemonset" in this chart (one Alloy
+# pod per node - required so each pod can read that node's own container
+# log files from its local disk; a Deployment couldn't see every node's
+# logs). Not overridden here; called out because it's the reason the log
+# pipeline below works at all.
+
+alloy:
+  mounts:
+    # Mounts the host's /var/log into the Alloy container - this is where
+    # kubelet writes every pod's container logs
+    # (/var/log/pods/<ns>_<pod>_<uid>/<container>/*.log), which the
+    # pipeline below tails. `dockercontainers` (the legacy Docker-runtime
+    # log path, /var/lib/docker/containers) is left off: EKS (and most
+    # current Kubernetes) uses containerd, which writes under /var/log/pods
+    # only.
+    varlog: true
+
+  # Downward-API-injected node name, referenced from the pipeline below as
+  # sys.env("ALLOY_NODE_NAME") - lets each DaemonSet pod filter Kubernetes'
+  # cluster-wide pod list down to just the pods actually running on ITS
+  # node (whose log files are the only ones it can physically read).
+  extraEnv:
+    - name: ALLOY_NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+  configMap:
+    create: true
+    content: |
+      // Discover every Pod in the cluster via the Kubernetes API.
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      // Keep only pods scheduled on THIS node (see the ALLOY_NODE_NAME env
+      // var above - this DaemonSet pod can only read its own node's log
+      // files anyway) and attach a small, deliberately low-cardinality
+      // label set: namespace, pod, container, and app name. Explicitly NOT
+      // included: request IDs, user IDs, full URLs/paths, or any other
+      // high-cardinality value - each unique label VALUE becomes its own
+      // stored stream in Loki, so a label like "request_id" would create
+      // one stream per request forever. See observability/README.md#cardinality.
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          regex         = sys.env("ALLOY_NODE_NAME")
+          action        = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+
+        // Builds the on-disk glob path for this pod/container's log file.
+        // Kubernetes names each pod's log directory
+        // "<namespace>_<pod>_<uid>", so matching on a leading "*" plus the
+        // pod UID reliably finds the right directory without needing the
+        // namespace/pod name repeated in the glob.
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // Container runtimes wrap each log line with their own metadata
+      // (timestamp, stream, flags). stage.cri unwraps that so Loki stores
+      // the application's own log line and uses the log's real timestamp
+      // instead of the time Alloy happened to read it.
+      loki.process "pod_logs" {
+        forward_to = [loki.write.default.receiver]
+
+        stage.cri {}
+      }
+
+      // Loki chart release name is pinned to "loki" (see
+      // argocd/application-dev-observability-loki.yaml's
+      // helm.releaseName), which is what makes this Service DNS name
+      // predictable.
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+      }

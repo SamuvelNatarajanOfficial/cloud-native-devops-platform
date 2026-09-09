@@ -53,9 +53,9 @@ including health/readiness semantics and data model.
 | Configuration management | Ansible (Linux server config, Docker, Node Exporter, hardening) |
 | Packaging          | Helm (templated, environment-parameterized chart) |
 | GitOps delivery     | ArgoCD (not yet installed - see Phase 4 below)   |
+| Observability       | Prometheus, Grafana, Loki, Alertmanager, Grafana Alloy (not yet installed - see Phase 5 below) |
 | CI/CD              | GitHub Actions                                 |
 | Security scanning  | hadolint, Trivy, gitleaks                      |
-| *Planned*          | Prometheus, Grafana, Loki, Alertmanager        |
 
 See [docs/technology-decisions.md](docs/technology-decisions.md) for the
 reasoning behind each choice.
@@ -90,16 +90,19 @@ reasoning behind each choice.
 
 ## Observability approach
 
-Not fully built out yet — this is a deliberately staged project. What's
-already in place:
-
 - Both services expose `/health` (liveness) and `/ready` (readiness)
   endpoints.
-- `task-service` exposes `/metrics` in Prometheus exposition format.
-
-Planned: a Prometheus/Grafana/Loki/Alertmanager stack (see roadmap below)
-that scrapes these endpoints and gives this platform real dashboards and
-alerts.
+- `task-service` exposes `/metrics` in Prometheus exposition format,
+  including golden-signal HTTP metrics (traffic/errors/latency) for every
+  route, added in Phase 5.
+- A full Prometheus/Grafana/Loki/Alertmanager stack is configured under
+  [observability/](observability/) and deployed via ArgoCD manifests under
+  [argocd/](argocd/) - three custom alert-severity groups, three Grafana
+  dashboards, and a log pipeline via Grafana Alloy. **Configured and
+  validated, not installed onto a real cluster** - see [Observability
+  (Phase 5)](#observability-phase-5) below for exactly what that means.
+- `api-gateway` does not yet expose `/metrics` - a known limitation, see
+  [observability/README.md#known-limitations](observability/README.md#known-limitations).
 
 ## Local development instructions
 
@@ -456,6 +459,77 @@ deciding that trade-off deliberately). Full details:
   namespace, and resource kinds rather than granting unrestricted
   cluster permissions.
 
+## Observability (Phase 5)
+
+A Prometheus/Grafana/Loki/Alertmanager stack under
+[observability/](observability/), deployed via three more ArgoCD
+Applications under [argocd/](argocd/) into a dedicated `monitoring`
+namespace - the same GitOps pattern Phase 4 established for the
+application itself. **This phase is validated (`helm template` against
+the real pinned chart versions, `promtool check rules`, `alloy validate`,
+full JSON/YAML validation, and the complete task-service test suite - see
+the Phase 5 implementation summary for every command and result) but not
+deployed**: nothing here has been installed onto a real cluster, no
+Prometheus has ever actually scraped anything, and no alert has ever
+actually fired. See
+[docs/observability-architecture.md](docs/observability-architecture.md)
+for the full architecture (with Mermaid diagrams of the metrics and logs
+data flows) and what's implemented vs. documented/future.
+
+### What's in the stack
+
+```
+observability/
+├── manifests/          # ServiceMonitor, PrometheusRule, Grafana dashboard ConfigMaps
+├── prometheus/         # kube-prometheus-stack values (Prometheus + Grafana + Alertmanager + kube-state-metrics + node-exporter)
+├── grafana/dashboards/ # 3 dashboards: TaskFlow Overview, Kubernetes Overview, Node/Infrastructure Overview
+├── loki/                # log storage (SingleBinary mode)
+└── alloy/               # log collector - see below for why Alloy, not Promtail
+```
+
+Pinned chart versions (verified via each chart repo's GitHub Releases API,
+not recalled from memory - see
+[observability/README.md#versions](observability/README.md#versions)):
+`kube-prometheus-stack` 90.0.0, `loki` 7.3.0, `alloy` 1.12.1.
+
+### Application metrics
+
+Before this phase, only `/health` and `/ready` were instrumented -
+task-service's real `/tasks` CRUD endpoints had no traffic/error/latency
+metrics at all. This phase adds generic HTTP middleware
+(`services/task-service/app/main.py`) covering every route, labeled by
+**route template** (`/tasks/{task_id}`) rather than resolved path -
+using the resolved path would create one Prometheus time series per task
+UUID ever requested, an unbounded-cardinality label. See
+[docs/observability-architecture.md#golden-signals](docs/observability-architecture.md#golden-signals).
+
+### Why Alloy, not Promtail
+
+Promtail (the log collector most existing Loki tutorials still show) is
+in Grafana Labs' own maintenance-only mode, with Grafana Alloy as its
+official, actively-developed replacement - this project builds the log
+pipeline on Alloy instead. See
+[observability/alloy/README.md](observability/alloy/README.md) for the
+full pipeline explanation.
+
+### Security considerations
+
+- Prometheus, Alertmanager, Loki, and Grafana all default to `ClusterIP` -
+  none are exposed publicly. See
+  [observability/README.md#security](observability/README.md#security).
+- No real secret is committed anywhere in this phase: Grafana's admin
+  credentials use the same `existingSecret` pattern as Phase 4's Postgres
+  password, and every Alertmanager receiver in the dev configuration is a
+  safe, no-op placeholder with no delivery channel (Slack/webhook/email)
+  configured at all. See
+  [observability/README.md#secrets](observability/README.md#secrets).
+- A dedicated `observability` AppProject (separate from `taskflow`'s)
+  whitelists only the cluster-scoped resources (CRDs, ClusterRole/
+  ClusterRoleBinding) this specific stack genuinely needs - verified by
+  actually rendering the charts and inspecting their output, not guessed.
+  See
+  [argocd/README.md#observability-applications](argocd/README.md#observability-applications).
+
 ## Future implementation phases
 
 - [x] **Phase 1 — Foundation**: application, Docker, docker-compose,
@@ -476,8 +550,13 @@ deciding that trade-off deliberately). Full details:
       above). Validated with `helm lint`/`helm template`/YAML
       validation — ArgoCD has not been installed anywhere and nothing
       has been deployed to a real cluster.
-- [ ] **Phase 5 — Observability**: Prometheus, Grafana, Loki, and
-      Alertmanager, wired to the `/metrics` endpoints already in place.
+- [x] **Phase 5 — Observability**: Prometheus, Grafana, Loki, and
+      Alertmanager (via kube-prometheus-stack + Loki + Grafana Alloy),
+      wired to task-service's `/metrics` endpoint and new golden-signal
+      HTTP metrics (see
+      [Observability (Phase 5)](#observability-phase-5) above). Validated
+      with `helm template`/`promtool check rules`/`alloy validate` -
+      nothing has been installed onto a real cluster.
 - [ ] **Phase 6 — Production concerns**: DNS, load balancing/ingress,
       TLS, and a documented production-troubleshooting runbook.
 

@@ -1,0 +1,73 @@
+# ArgoCD Application for Prometheus + Grafana + Alertmanager + kube-state-metrics
+# + node-exporter, all bundled in the kube-prometheus-stack chart. A
+# multi-source Application (ArgoCD's mechanism for combining an external
+# Helm chart with values/manifests that live in THIS repo, instead of a
+# single `source:`) - see argocd/README.md#observability-applications for
+# why plain single-source Applications can't do this.
+#
+# As with every other Application in this repo, applying this manifest
+# tells an already-installed ArgoCD to start reconciling it - it does not
+# install ArgoCD, and nothing in this repository applies it automatically.
+# Nothing here has been installed onto a real cluster in this phase - see
+# the Phase 5 implementation summary's "AWS changes" / "Runtime validation"
+# sections.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-kube-prometheus-stack
+  namespace: argocd
+spec:
+  project: observability
+
+  sources:
+    # Source 1: the upstream Helm chart itself, pinned to the exact version
+    # verified in observability/prometheus/values-dev.yaml's own header
+    # comment - never `targetRevision: "*"` or an unpinned floating version.
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 90.0.0
+      helm:
+        # A fixed, predictable Helm release name - other values/manifests
+        # in this repo (e.g. Grafana's Loki datasource URL) depend on
+        # predictable Service DNS names, which depend on this.
+        releaseName: kube-prometheus-stack
+        # $values is ArgoCD's multi-source syntax for "read this file from
+        # the OTHER source below that declared ref: values" - this is what
+        # lets an externally-hosted chart use a values file that lives in
+        # this Git repo instead of being inlined into this Application.
+        valueFiles:
+          - $values/observability/prometheus/values-dev.yaml
+
+    # Source 2: this repo, referenced only for its values file above (no
+    # `path:` - this source contributes no manifests of its own).
+    - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+      targetRevision: main
+      ref: values
+
+    # Source 3: this repo again, this time for the plain Kubernetes
+    # manifests that aren't part of the Helm chart at all - TaskFlow's
+    # ServiceMonitor, the custom PrometheusRule, and the Grafana dashboard
+    # ConfigMaps (see observability/manifests/). Kept in a dedicated
+    # directory containing ONLY valid manifests (no values-*.yaml files)
+    # so ArgoCD's plain-manifest source doesn't try to parse a Helm values
+    # file as a Kubernetes object.
+    - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+      targetRevision: main
+      path: observability/manifests
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

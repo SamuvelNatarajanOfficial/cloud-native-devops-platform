@@ -1,0 +1,60 @@
+# ServiceMonitor for task-service's existing /metrics endpoint
+# (services/task-service/app/main.py - unchanged by this phase except for
+# the golden-signal HTTP metrics added alongside it, see
+# docs/observability-architecture.md#golden-signals).
+#
+# Why a ServiceMonitor instead of a static Prometheus scrape_configs entry:
+# a static config would need Prometheus's own config reloaded (a
+# kube-prometheus-stack Helm upgrade) every time a target changes. A
+# ServiceMonitor is Kubernetes-native service discovery instead - the
+# Prometheus Operator watches for ServiceMonitor objects matching
+# Prometheus's selector (see
+# observability/prometheus/values-dev.yaml's
+# serviceMonitorSelectorNilUsesHelmValues) and automatically (re)generates
+# Prometheus's scrape config from whatever Kubernetes Services currently
+# match `spec.selector` below - no IP address, pod name, or replica count
+# is ever hardcoded.
+#
+# Why this lives here instead of inside helm/taskflow/: TaskFlow's chart
+# (Phase 4) predates this phase and intentionally wasn't modified to avoid
+# mixing an application-packaging change into an observability phase. A
+# more mature version of this project would move this ServiceMonitor into
+# helm/taskflow/templates/ so the app's own chart owns its own monitoring
+# configuration - see observability/README.md#known-limitations.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taskflow-task-service
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: taskflow-task-service
+    app.kubernetes.io/part-of: taskflow
+spec:
+  # task-service's own Service (helm/taskflow/templates/task-service-service.yaml)
+  # lives in the "taskflow" namespace, not "monitoring" where this
+  # ServiceMonitor and Prometheus itself live - namespaceSelector is what
+  # lets Prometheus look cross-namespace for the Service to discover.
+  # By default Prometheus Operator sets the `job` label from the Service's
+  # own metadata.name - which for this chart is "<release>-task-service"
+  # (see helm/taskflow's taskflow.componentFullname helper), i.e. it would
+  # change if the Helm release were ever renamed. Setting jobLabel instead
+  # reads `job` from this fixed label value, so every alert rule and
+  # dashboard query below can reliably use job="task-service" regardless of
+  # release name.
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+      - taskflow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: task-service
+      app.kubernetes.io/part-of: taskflow
+  endpoints:
+    - port: http # matches the Service's named port (see task-service-service.yaml)
+      path: /metrics
+      # 15s (this chart's own scrape-interval default) is frequent enough
+      # to make the golden-signal dashboards responsive without generating
+      # excessive sample volume for a service this size - see
+      # docs/observability-architecture.md#golden-signals.
+      interval: 15s
+      scrapeTimeout: 10s

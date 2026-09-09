@@ -1,0 +1,48 @@
+# ArgoCD Application for Loki (log storage). Same multi-source pattern as
+# application-dev-observability-kube-prometheus-stack.yaml (chart + a
+# values-only source referencing this repo) - see that file's comments and
+# argocd/README.md#observability-applications for the full explanation.
+#
+# Not installed onto a real cluster in this phase - see the Phase 5
+# implementation summary.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-loki
+  namespace: argocd
+spec:
+  project: observability
+
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.3.0
+      helm:
+        # Fixed release name "loki" -> predictable Service name
+        # "loki-gateway", which observability/prometheus/values-dev.yaml's
+        # Grafana datasource and observability/alloy/values-dev.yaml's log
+        # pipeline both reference directly.
+        releaseName: loki
+        valueFiles:
+          - $values/observability/loki/values-dev.yaml
+
+    - repoURL: https://github.com/SamuvelNatarajanOfficial/cloud-native-devops-platform.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

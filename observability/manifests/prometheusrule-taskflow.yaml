@@ -1,0 +1,218 @@
+# Alert rules for TaskFlow and the cluster it runs on. Every alert below is
+# documented in full (meaning / likely causes / first checks) in
+# docs/observability-runbook.md - annotations here link to that document
+# rather than duplicating the explanation.
+#
+# Thresholds are stated explicitly as portfolio-reasonable starting points,
+# not numbers derived from real production traffic (there is none - see
+# docs/observability-architecture.md#slo-thinking). A real deployment would
+# tune every threshold here against actual observed baselines.
+#
+# `for:` durations follow one rule throughout: long enough that a single
+# scrape blip or a rolling deployment's brief unready window doesn't page
+# anyone, short enough that a genuine problem is still caught quickly. See
+# docs/observability-runbook.md#alerting-philosophy for the general
+# "actionable, not noisy" principle this is applying.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: taskflow-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: taskflow-alerts
+    app.kubernetes.io/part-of: taskflow
+spec:
+  groups:
+    # -------------------------------------------------------------------
+    # Application-level: task-service's own golden-signal metrics
+    # (services/task-service/app/main.py) - see
+    # docs/observability-architecture.md#golden-signals.
+    # -------------------------------------------------------------------
+    - name: taskflow.application
+      rules:
+        - alert: TaskServiceDown
+          expr: up{job="task-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "task-service is not being scraped by Prometheus."
+            description: >-
+              Prometheus has not successfully scraped task-service's
+              /metrics endpoint for at least 2 minutes. This almost always
+              means the pod(s) are down, crash-looping, or unreachable -
+              not merely "slow".
+            runbook_url: "docs/observability-runbook.md#1-application-is-down"
+
+        - alert: TaskServiceHighErrorRate
+          expr: >-
+            sum(rate(task_service_http_requests_total{job="task-service", status_code=~"5.."}[5m]))
+            /
+            sum(rate(task_service_http_requests_total{job="task-service"}[5m]))
+            > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "task-service is returning 5xx for more than 5% of requests."
+            description: >-
+              More than 5% of task-service requests over the last 5
+              minutes resulted in a 5xx response. See
+              task_service_http_requests_total by status_code and path in
+              Grafana's TaskFlow Overview dashboard to narrow down which
+              route is failing.
+            runbook_url: "docs/observability-runbook.md#2-high-http-error-rate"
+
+        - alert: TaskServiceCriticalErrorRate
+          expr: >-
+            sum(rate(task_service_http_requests_total{job="task-service", status_code=~"5.."}[5m]))
+            /
+            sum(rate(task_service_http_requests_total{job="task-service"}[5m]))
+            > 0.25
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "task-service is returning 5xx for more than 25% of requests."
+            description: >-
+              Same condition as TaskServiceHighErrorRate at a much higher
+              threshold - this is very unlikely to be a partial/transient
+              issue.
+            runbook_url: "docs/observability-runbook.md#2-high-http-error-rate"
+
+        - alert: TaskServiceHighLatency
+          expr: >-
+            histogram_quantile(0.95,
+              sum(rate(task_service_http_request_duration_seconds_bucket{job="task-service"}[5m])) by (le)
+            ) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "task-service p95 request latency is above 1 second."
+            description: >-
+              95th percentile request latency across all routes has been
+              above 1s for 5 minutes. 1s is a deliberately conservative
+              example threshold for a simple CRUD API with no heavy
+              external dependency beyond Postgres - see
+              docs/observability-architecture.md#slo-thinking.
+            runbook_url: "docs/observability-runbook.md#3-high-latency"
+
+    # -------------------------------------------------------------------
+    # Kubernetes workload health: kube-state-metrics (object state), NOT
+    # cAdvisor/container resource usage - see
+    # docs/observability-architecture.md#what-kube-state-metrics-is-and-is-not.
+    # -------------------------------------------------------------------
+    - name: taskflow.kubernetes
+      rules:
+        - alert: TaskFlowPodRestartingFrequently
+          expr: increase(kube_pod_container_status_restarts_total{namespace="taskflow"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A TaskFlow pod has restarted more than 3 times in 15 minutes."
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.pod }} container
+              {{ $labels.container }} has restarted more than 3 times in
+              the last 15 minutes - a crash loop, not an isolated
+              incident.
+            runbook_url: "docs/observability-runbook.md#4-pod-restarting"
+
+        - alert: TaskFlowPodNotReady
+          expr: sum by (namespace, pod) (kube_pod_status_ready{namespace="taskflow", condition="true"} == 0) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A TaskFlow pod has not reported Ready for 10 minutes."
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.pod }} has not satisfied
+              its readiness probe for 10 minutes - see the pod's own
+              /ready endpoint semantics in
+              docs/architecture.md#health--readiness-semantics.
+            runbook_url: "docs/observability-runbook.md#5-pod-not-ready"
+
+        - alert: TaskFlowDeploymentReplicaMismatch
+          expr: >-
+            kube_deployment_spec_replicas{namespace="taskflow"}
+            != kube_deployment_status_replicas_available{namespace="taskflow"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A TaskFlow Deployment doesn't have all its replicas available."
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.deployment }} has fewer
+              available replicas than its spec requests, sustained for 15
+              minutes (long enough to rule out a normal rolling update).
+            runbook_url: "docs/observability-runbook.md#5-pod-not-ready"
+
+    # -------------------------------------------------------------------
+    # Node / infrastructure: prometheus-node-exporter metrics (actual
+    # resource usage, unlike kube-state-metrics above).
+    # -------------------------------------------------------------------
+    - name: taskflow.infrastructure
+      rules:
+        - alert: NodeHighCPUUsage
+          expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} CPU usage is above 85%."
+            description: >-
+              Average CPU utilization on {{ $labels.instance }} has been
+              above 85% for 10 minutes.
+            runbook_url: "docs/observability-runbook.md#6-node-resource-pressure"
+
+        - alert: NodeHighMemoryUsage
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} memory usage is above 90%."
+            description: >-
+              Available memory on {{ $labels.instance }} has been below
+              10% of total for 10 minutes.
+            runbook_url: "docs/observability-runbook.md#6-node-resource-pressure"
+
+        - alert: NodeFilesystemSpacePressure
+          expr: >-
+            (
+              node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+            ) * 100 < 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node {{ $labels.instance }} filesystem {{ $labels.mountpoint }} has less than 10% free."
+            description: >-
+              Filesystem {{ $labels.mountpoint }} on
+              {{ $labels.instance }} has less than 10% free space for 15
+              minutes - risks pod evictions and image pull failures.
+            runbook_url: "docs/observability-runbook.md#6-node-resource-pressure"
+
+    # -------------------------------------------------------------------
+    # Meta: is the monitoring stack itself working?
+    # -------------------------------------------------------------------
+    - name: taskflow.meta
+      rules:
+        - alert: PrometheusTargetDown
+          expr: up == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Prometheus target {{ $labels.job }}/{{ $labels.instance }} is down."
+            description: >-
+              A generic "is monitoring itself healthy" signal covering
+              every scrape target, not just TaskFlow - fires for ANY
+              target (a node-exporter pod, kube-state-metrics, Loki,
+              etc.) that Prometheus can't reach for 5 minutes. In a much
+              larger cluster this would usually be scoped further to
+              avoid noise from expected scale-to-zero components - not a
+              concern at this project's scale.
+            runbook_url: "docs/observability-runbook.md#7-prometheus-target-down"
