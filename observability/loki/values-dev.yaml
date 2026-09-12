@@ -47,6 +47,16 @@ loki:
 
   compactor:
     retention_enabled: true
+    # Required by Loki whenever retention_enabled is true - Loki 3.6.11
+    # refuses to start without it ("CONFIG ERROR: invalid compactor
+    # config: compactor.delete-request-store should be configured when
+    # retention is enabled"), a real startup failure this project only
+    # discovered via Phase 7's actual runtime deployment (this
+    # requirement post-dates whatever Loki version this value was
+    # originally written against in Phase 5). Matches
+    # `loki.storage.type: filesystem` above - deleted chunks are tracked
+    # in the same filesystem backend everything else already uses.
+    delete_request_store: filesystem
 
 singleBinary:
   replicas: 1

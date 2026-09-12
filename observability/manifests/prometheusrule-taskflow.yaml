@@ -31,7 +31,18 @@ spec:
     - name: taskflow.application
       rules:
         - alert: TaskServiceDown
-          expr: up{job="task-service"} == 0
+          # `up{job=...} == 0` alone only catches a target that EXISTS but
+          # fails to respond to scrapes (crash-looping, network issue). A
+          # ServiceMonitor with zero matching endpoints (e.g. the
+          # Deployment scaled to 0 replicas) removes the target from
+          # discovery entirely - Prometheus never records a `0` sample for
+          # it, so the up==0 condition never becomes true and this alert
+          # would never fire for a full outage. Phase 7's actual local
+          # runtime incident simulation (scaling api-gateway to 0)
+          # discovered this exact gap - see
+          # docs/local-runtime-validation.md. `absent(...)` catches the
+          # "no target at all" case the equality check misses.
+          expr: up{job="task-service"} == 0 or absent(up{job="task-service"})
           for: 2m
           labels:
             severity: critical
@@ -111,7 +122,11 @@ spec:
     - name: taskflow.application.gateway
       rules:
         - alert: ApiGatewayDown
-          expr: up{job="api-gateway"} == 0
+          # See TaskServiceDown's identical comment (taskflow.application
+          # group, above) - `absent(...)` is required alongside `== 0` or
+          # this alert never fires when api-gateway is scaled to 0 rather
+          # than merely failing its scrapes.
+          expr: up{job="api-gateway"} == 0 or absent(up{job="api-gateway"})
           for: 2m
           labels:
             severity: critical

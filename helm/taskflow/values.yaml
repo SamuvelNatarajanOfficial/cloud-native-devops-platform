@@ -121,6 +121,18 @@ apiGateway:
   securityContext:
     pod:
       runAsNonRoot: true
+      # Explicit numeric UID/GID, matching the "app" user each Dockerfile
+      # creates (services/api-gateway/Dockerfile,
+      # services/task-service/Dockerfile) - required for runAsNonRoot to
+      # actually work. Without an explicit runAsUser, Kubernetes cannot
+      # verify a container image's *named* user is non-root without
+      # starting it first, so it refuses to start the container at all
+      # ("container has runAsNonRoot and image has non-numeric user...
+      # cannot verify user is non-root") - a real failure this project
+      # only discovered via actual runtime deployment (Phase 7), not
+      # static validation. See docs/local-runtime-validation.md.
+      runAsUser: 10001
+      runAsGroup: 10001
       seccompProfile:
         type: RuntimeDefault
     container:
@@ -187,6 +199,18 @@ taskService:
   securityContext:
     pod:
       runAsNonRoot: true
+      # Explicit numeric UID/GID, matching the "app" user each Dockerfile
+      # creates (services/api-gateway/Dockerfile,
+      # services/task-service/Dockerfile) - required for runAsNonRoot to
+      # actually work. Without an explicit runAsUser, Kubernetes cannot
+      # verify a container image's *named* user is non-root without
+      # starting it first, so it refuses to start the container at all
+      # ("container has runAsNonRoot and image has non-numeric user...
+      # cannot verify user is non-root") - a real failure this project
+      # only discovered via actual runtime deployment (Phase 7), not
+      # static validation. See docs/local-runtime-validation.md.
+      runAsUser: 10001
+      runAsGroup: 10001
       seccompProfile:
         type: RuntimeDefault
     container:
@@ -242,18 +266,23 @@ postgres:
 
   # Intentionally a smaller subset than apiGateway/taskService's security
   # context - see helm/taskflow/README.md's "Security context" section
-  # for exactly why (the stock postgres image's entrypoint needs to
-  # start as root to prepare the data directory on first run, before
-  # dropping privileges internally). This is based on that image's
-  # documented behavior, not applied blindly - but it was not verified
-  # against a live cluster in this phase (see the root Phase 4 summary's
-  # "Known limitations").
+  # for exactly why (the stock postgres image's entrypoint needs to start
+  # as root to prepare the data directory on first run, before dropping
+  # privileges internally via gosu). Phase 4 flagged this as "not verified
+  # against a live cluster"; Phase 7's actual runtime deployment verified
+  # it and found `capabilities.drop: ["ALL"]` genuinely breaks postgres
+  # startup - CrashLoopBackOff with "chmod: /var/run/postgresql:
+  # Operation not permitted" / "chown: /var/lib/postgresql/data: Operation
+  # not permitted", because dropping ALL capabilities removes root's
+  # normal CAP_CHOWN/CAP_FOWNER/CAP_DAC_OVERRIDE - the exact capabilities
+  # its entrypoint needs to prepare the mounted volume before it drops to
+  # the postgres user. No capabilities are dropped here as a result - this
+  # container needs root's full default capability set for its bootstrap
+  # step, not a narrowed one. See docs/local-runtime-validation.md.
   securityContext:
     pod: {}
     container:
       allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
 
   podAnnotations: {}
   nodeSelector: {}

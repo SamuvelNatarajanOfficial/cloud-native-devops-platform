@@ -13,9 +13,20 @@ answer is Helm (packaging/templating) + ArgoCD (GitOps reconciliation).
 validated (see [helm/taskflow/README.md](../helm/taskflow/README.md) and
 [argocd/README.md](../argocd/README.md) for exactly which commands were
 run). What is **not** implemented: no image has been pushed to a real
-registry, ArgoCD has not been installed anywhere, and nothing has been
-deployed to the real EKS cluster from Phase 2. This document is explicit
-about that line throughout.
+registry, and nothing has been deployed to the real EKS cluster from
+Phase 2. This document is explicit about that line throughout.
+
+**Update (Phase 7):** ArgoCD *has* since been installed - on a local
+Docker Desktop Kubernetes cluster, not EKS - and a real `Application`
+successfully synced this project's actual public GitHub repository
+(`Synced: true`), then self-healed a manually-introduced replica-count
+drift back to the Git-declared state within about a second, confirmed via
+ArgoCD's own event log. Because no image has been pushed to a registry,
+the synced pods themselves couldn't pull a real image and become
+`Healthy` - the GitOps *mechanism* (sync, drift detection, self-heal) is
+what this confirmed, not full application health. See
+[docs/local-runtime-validation.md](local-runtime-validation.md) for the
+full evidence. Deployment onto the real EKS cluster remains untested.
 
 ## End-to-end flow
 

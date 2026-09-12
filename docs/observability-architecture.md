@@ -14,11 +14,19 @@ plain Kubernetes manifest, alert rule, and dashboard under
 was validated locally (see the Phase 5 implementation summary for the
 exact commands and results: `helm template` against the real pinned chart
 versions, `promtool check rules`, `alloy validate`, JSON/YAML validation,
-and the full task-service test suite). What is **not** implemented: none
-of it has been installed onto a real cluster - no Prometheus has ever
-actually scraped task-service, no log has ever actually reached Loki, and
-no alert has ever actually fired. This document is explicit about that
-line throughout, the same way
+and the full task-service test suite).
+
+**Update (Phase 7):** this entire stack has since been deployed onto a
+real local Kubernetes cluster (Docker Desktop) and confirmed working at
+runtime - Prometheus really did scrape both services, alerts really did
+transition to `firing` during incident simulations and really did reach
+Alertmanager, and logs really did flow through Alloy into Loki. See
+[docs/local-runtime-validation.md](local-runtime-validation.md) for the
+full evidence, including two real bugs this exact stack's config had that
+only a real deployment surfaced. What remains unvalidated is the AWS
+side specifically - no EKS cluster was used, matching
+[docs/local-runtime-validation.md#aws-runtime-limitations](local-runtime-validation.md#aws-runtime-limitations).
+This document is otherwise unchanged from how Phase 5 wrote it, the same way
 [docs/gitops-architecture.md](gitops-architecture.md) is for Phase 4.
 
 ## Metrics flow

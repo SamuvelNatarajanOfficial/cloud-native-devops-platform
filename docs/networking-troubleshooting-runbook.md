@@ -6,11 +6,23 @@ ALB → TLS → Ingress → api-gateway → task-service). Companion to
 application/cluster-internal issues - this document is specifically about
 everything on the path *into* the cluster.
 
-**None of these have been exercised against a real incident, a real
-domain, or a real cluster** - see
+**None of these have been exercised against a real domain, a real ALB, or
+a real EKS cluster** - see
 [docs/networking-architecture.md](networking-architecture.md) for exactly
 what is and isn't deployed. This is written from a correct understanding
 of the architecture, not lived experience with this specific deployment.
+
+**Update (Phase 7):** the *Kubernetes-layer* mechanics behind
+[#6](#6-ingress-exists-but-traffic-does-not-reach-service),
+[#7](#7-service-exists-but-endpoints-are-empty), and
+[#8](#8-pod-is-running-but-application-is-unreachable) were exercised for
+real via ingress-nginx on a local cluster (not the AWS Load Balancer
+Controller) - see
+[docs/local-runtime-validation.md](local-runtime-validation.md). Every
+AWS-specific scenario in this document (ALB, ACM, Route 53, CloudWatch)
+remains genuinely untested - local ingress-nginx and a self-signed
+certificate are not equivalent to those AWS components, and this document
+does not claim otherwise.
 
 Commands assume `kubectl` is already configured against the cluster
 (`aws eks update-kubeconfig ...` - see the root README). AWS CLI commands

@@ -1,0 +1,45 @@
+# Standalone local-only Ingress for Phase 7 runtime validation - targets
+# the SAME api-gateway Service the helm/taskflow chart creates
+# (taskflow-api-gateway), but through ingress-nginx instead of the AWS
+# Load Balancer Controller.
+#
+# Deliberately NOT part of the helm/taskflow chart and NOT a modification
+# of helm/taskflow/templates/ingress.yaml (which is AWS-ALB-specific -
+# alb.ingress.kubernetes.io/* annotations, no spec.tls block - and stays
+# disabled/untouched for this phase, per Phase 7's own constraint not to
+# repurpose or weaken the AWS ingress configuration for local testing).
+# This file exists purely to runtime-test the actual mechanism (Ingress ->
+# Service -> Pod, TLS termination, host-based routing) that
+# docs/networking-architecture.md describes conceptually for AWS - see
+# docs/local-runtime-validation.md for the full local-vs-AWS distinction.
+#
+# Apply:
+#   kubectl apply -f runtime/local/manifests/ingress-local.yaml
+# (after the taskflow-local-tls Secret has been created - see
+# runtime/local/scripts/generate-local-tls.sh)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taskflow-local
+  namespace: taskflow
+  annotations:
+    # Local self-signed cert - nginx must not try to auto-provision
+    # anything (no cert-manager involved here).
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - taskflow.local
+      secretName: taskflow-local-tls
+  rules:
+    - host: taskflow.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: taskflow-api-gateway
+                port:
+                  number: 8080

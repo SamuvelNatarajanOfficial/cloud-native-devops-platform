@@ -1,12 +1,19 @@
 # Observability runbook (Phase 5)
 
 Troubleshooting procedures for TaskFlow and the monitoring stack itself.
-**None of these have been exercised against a real incident or a real
-cluster** - this is written the way a runbook would be written *before*
-first going live, from a correct understanding of the architecture (see
+Originally written (Phase 5) the way a runbook would be written *before*
+first going live - from a correct understanding of the architecture (see
 [docs/observability-architecture.md](observability-architecture.md)), not
-from lived experience with this specific deployment. Treat it as a
-starting point to refine once the stack is actually running somewhere.
+from lived experience with this specific deployment.
+
+**Update (Phase 7):** sections [#1](#1-application-is-down),
+[#2](#2-high-http-error-rate), and [#4](#4-pod-restarting) have since been
+exercised for real (services scaled to zero, a real 100% error rate
+generated, a pod deleted) on a local Kubernetes cluster - see
+[docs/local-runtime-validation.md](local-runtime-validation.md#sre-incident-tests)
+for the actual commands and observed results, which matched this
+runbook's own predictions. The remaining sections are still unexercised
+against a real incident.
 
 ## Alerting philosophy
 

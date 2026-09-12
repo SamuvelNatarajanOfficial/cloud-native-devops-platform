@@ -46,6 +46,12 @@ spec:
   #     access to discover targets - this is the actual RBAC cost of
   #     running a cluster-monitoring stack, not something this project
   #     could reasonably scope down to namespace-only Roles.
+  #   - MutatingWebhookConfiguration / ValidatingWebhookConfiguration: the
+  #     Operator's own admission webhooks for Prometheus/Alertmanager CRs
+  #     (prometheusOperator.admissionWebhooks.enabled - see
+  #     observability/prometheus/values-dev.yaml's own comment on why this
+  #     is left at the chart's default `true` after Phase 7's runtime
+  #     testing found `false` leaves the Operator pod unable to start).
   # This project deliberately does NOT allow a Namespace resource here -
   # the "monitoring" namespace is created via each Application's own
   # CreateNamespace=true syncOption instead, same pattern as
@@ -57,6 +63,10 @@ spec:
       kind: ClusterRole
     - group: rbac.authorization.k8s.io
       kind: ClusterRoleBinding
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
 
   # Every namespaced Kind the three Applications in this project actually
   # render (same empirical verification as above) - not a blanket "*".
@@ -75,6 +85,12 @@ spec:
       kind: DaemonSet
     - group: apps
       kind: StatefulSet
+    - group: batch
+      kind: Job
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
     - group: monitoring.coreos.com
       kind: Prometheus
     - group: monitoring.coreos.com

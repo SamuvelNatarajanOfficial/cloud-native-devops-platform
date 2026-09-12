@@ -1,0 +1,40 @@
+# Local runtime overlay for helm/taskflow - Phase 7 (local Kubernetes
+# runtime validation). Layered ON TOP of values-dev.yaml, not a
+# replacement for it:
+#
+#   helm install taskflow helm/taskflow -n taskflow --create-namespace \
+#     -f helm/taskflow/values-dev.yaml \
+#     -f runtime/local/values/taskflow-values-local.yaml
+#
+# This file ONLY overrides what's genuinely local-runtime-specific
+# (locally-built image tags/pull policy). It does NOT touch
+# apiGateway.ingress.* - that template
+# (helm/taskflow/templates/ingress.yaml) is AWS Load Balancer Controller-
+# specific (ALB annotations, no spec.tls block) and is left disabled here
+# on purpose, per this phase's own constraint not to modify or repurpose
+# the AWS ingress configuration for local testing. Local Ingress routing
+# is instead tested via a completely separate, standalone manifest -
+# see runtime/local/manifests/ingress-local.yaml - which targets the same
+# api-gateway Service this chart creates, using ingress-nginx instead of
+# the ALB annotations. See docs/local-runtime-validation.md.
+
+apiGateway:
+  image:
+    tag: "local"
+    # Never pull from a registry - taskflow/api-gateway:local only exists
+    # in this machine's local Docker image store (built directly via
+    # `docker build`, visible to Docker Desktop's Kubernetes automatically
+    # since both share the same Docker daemon - no image-loading step
+    # needed, unlike Kind).
+    pullPolicy: Never
+
+taskService:
+  image:
+    tag: "local"
+    pullPolicy: Never
+
+# postgres keeps values.yaml's own image (the public postgres:16-alpine,
+# already usable locally) and values-dev.yaml's persistence/resources -
+# nothing local-specific to override. The cluster's default StorageClass
+# ("hostpath", Docker Desktop's own built-in dynamic provisioner) already
+# satisfies postgres.persistence's empty storageClassName.

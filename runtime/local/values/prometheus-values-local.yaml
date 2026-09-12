@@ -1,0 +1,26 @@
+# Local runtime overlay for kube-prometheus-stack - Phase 7. Layered ON
+# TOP of observability/prometheus/values-dev.yaml, not a replacement:
+#
+#   helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --version 90.0.0 -n monitoring \
+#     -f observability/prometheus/values-dev.yaml \
+#     -f runtime/local/values/prometheus-values-local.yaml
+#
+# Only override here what's genuinely specific to Docker Desktop's local
+# Kubernetes - the actual Phase 5 dev values file stays aimed at a real
+# EKS dev cluster.
+
+prometheus-node-exporter:
+  hostRootFsMount:
+    # Docker Desktop's Kubernetes (WSL2-backed) does not mark its root
+    # filesystem mount as "shared" or "slave" - node-exporter's default
+    # HostToContainer propagation mode requires that, and fails outright
+    # without it:
+    #   Error: failed to start container "node-exporter": Error response
+    #   from daemon: path / is mounted on / but it is not a shared or
+    #   slave mount
+    # This is a genuine local-environment limitation discovered via
+    # Phase 7's actual runtime deployment, not a configuration mistake -
+    # a real EKS node (Phase 5's actual target) does not have this
+    # restriction. See docs/local-runtime-validation.md.
+    mountPropagation: None

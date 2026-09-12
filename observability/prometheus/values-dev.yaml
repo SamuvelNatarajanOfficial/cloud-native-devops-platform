@@ -23,17 +23,25 @@ prometheusOperator:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: 200m, memory: 256Mi }
 
-  # Disabled for the dev/lab environment: the Operator's admission webhooks
-  # validate PrometheusRule/AlertmanagerConfig objects on the fly, but need
-  # a TLS cert (normally auto-provisioned via a Job + patch, or cert-manager)
-  # and two more cluster-scoped resources (ValidatingWebhookConfiguration,
-  # MutatingWebhookConfiguration). That's real complexity for a single-tenant
-  # lab cluster where a syntactically-broken PrometheusRule is caught by
-  # `promtool check rules` in CI anyway (see .github/workflows - this phase's
-  # local validation used the same tool manually, see the Phase 5 summary).
-  # Enable this in a real multi-team cluster - see values-prod.yaml.
+  # Phase 5 originally set this to `false`, reasoning that a single-tenant
+  # lab cluster doesn't need live PrometheusRule/AlertmanagerConfig
+  # admission validation when `promtool check rules` already catches
+  # syntax errors in CI. Phase 7's actual local runtime deployment proved
+  # that reasoning wrong in practice: in kube-prometheus-stack 90.0.0,
+  # `enabled: false` skips the Job that self-generates the Operator's own
+  # TLS certificate/Secret (`job-createSecret`/`job-patchWebhook`), but the
+  # Operator Deployment itself unconditionally mounts that same Secret
+  # regardless of this flag - so `enabled: false` leaves the Operator
+  # pod stuck (`FailedMount: secret "kube-prometheus-stack-admission" not
+  # found`), and nothing downstream (Prometheus, Alertmanager) ever gets
+  # reconciled. Left at the chart's own default (`true`) as a result - see
+  # docs/local-runtime-validation.md for the full incident. The two extra
+  # cluster-scoped resources this adds
+  # (ValidatingWebhookConfiguration/MutatingWebhookConfiguration) are
+  # accounted for in argocd/observability-project.yaml's
+  # clusterResourceWhitelist.
   admissionWebhooks:
-    enabled: false
+    enabled: true
 
 # ---------------------------------------------------------------------------
 # Prometheus itself

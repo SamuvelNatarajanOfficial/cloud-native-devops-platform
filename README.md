@@ -598,6 +598,49 @@ Only `api-gateway` is ever externally reachable; `task-service`,
   verified against actual `helm template --include-crds` output rather
   than guessed.
 
+## Local Kubernetes Runtime Validation (Phase 7)
+
+Phases 1-6 were validated *statically* (`helm template`, `terraform
+validate`, `kubeconform`, `promtool check rules`) - real checks, but none
+of them ever started a real container or watched a real alert fire.
+Phase 7 closes that gap: the actual application, Helm chart, and
+observability stack were deployed onto a real local Kubernetes cluster
+(Docker Desktop's built-in single-node Kubernetes - not Kind; see below)
+and put through real failure scenarios - services scaled to zero, pods
+deleted, a 100% error rate generated for real, alerts confirmed
+transitioning `inactive -> pending -> firing` in Prometheus and appearing
+in Alertmanager, logs confirmed flowing end-to-end into Loki.
+
+**This runtime validation found and fixed 5 real bugs** that no amount of
+static validation had caught - a `runAsNonRoot` misconfiguration that
+prevented both application containers from starting at all, a
+capabilities setting that broke PostgreSQL's own startup, a
+`kube-prometheus-stack` flag that left its Operator unable to start, a
+Loki config gap, and an alert-expression gap that meant `TaskServiceDown`/
+`ApiGatewayDown` would never have fired for a full outage. All five are
+fixed in the real project files (not local-only workarounds) - see
+[docs/local-runtime-validation.md](docs/local-runtime-validation.md) for
+the full diagnosis of each.
+
+**Local ingress-nginx simulates the external ingress path** (`runtime/local/`)
+- it is **not** a substitute for the AWS Load Balancer Controller, and
+nothing in Phase 6's AWS-oriented Helm/Terraform/ArgoCD configuration was
+changed to accommodate it. AWS ALB, Route 53, ACM, and IRSA runtime
+behavior remain genuinely untested - they require a real AWS environment,
+which this phase deliberately did not create (no `terraform apply`, no
+AWS resources, no EKS).
+
+ArgoCD was also installed for real, and a real `Application` synced this
+repository's actual public GitHub URL (`Synced: true`), then
+self-healed a manual `kubectl scale` drift back to the Git-declared
+replica count within about a second - confirmed via ArgoCD's own event
+log, not just inference.
+
+Full environment details, a PASS/FAIL table across every area tested, all
+5 incident simulations with before/after evidence, and the explicit list
+of what still requires a real AWS environment:
+[docs/local-runtime-validation.md](docs/local-runtime-validation.md).
+
 ## Future implementation phases
 
 - [x] **Phase 1 — Foundation**: application, Docker, docker-compose,
@@ -633,6 +676,18 @@ Only `api-gateway` is ever externally reachable; `task-service`,
       above). Validated with `terraform validate`/`helm template`/`kubeconform`
       - nothing has been installed onto a real cluster and no real domain
       or certificate was used.
+- [x] **Phase 7 — Local Kubernetes runtime validation**: the application,
+      Helm chart, and observability stack actually deployed and exercised
+      on a real local Kubernetes cluster (Docker Desktop) - real pod
+      deployment, real service-to-service communication, real Ingress/TLS
+      traffic, real Prometheus scraping, real log ingestion into Loki, 4
+      real incident simulations with alerts genuinely reaching
+      Alertmanager, and a real ArgoCD sync + self-heal (see [Local
+      Kubernetes Runtime Validation (Phase 7)](#local-kubernetes-runtime-validation-phase-7)
+      above). Found and fixed 5 real bugs static validation had missed.
+      AWS-specific runtime (EKS, ALB, Route 53, ACM, IRSA) remains
+      untested - see
+      [docs/local-runtime-validation.md#aws-runtime-limitations](docs/local-runtime-validation.md#aws-runtime-limitations).
 
 ## Disclaimer
 

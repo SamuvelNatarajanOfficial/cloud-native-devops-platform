@@ -78,3 +78,13 @@ coverage/
 htmlcov/
 dist/
 build/
+
+# --- Phase 7 local runtime (Docker Desktop Kubernetes validation) ---
+# Generated self-signed TLS material (*.key/*.crt above already cover
+# this, restated here for clarity since it's specifically
+# security-sensitive local runtime output, not general repo noise):
+runtime/local/tls/generated/
+# Exported/dumped kubeconfig someone might redirect here while following
+# docs/local-runtime-validation.md - never intentional to commit.
+runtime/**/kubeconfig
+runtime/**/*.kubeconfig

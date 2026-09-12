@@ -1,0 +1,106 @@
+# Local runtime overlay for Grafana Alloy - Phase 7. Layered ON TOP of
+# observability/alloy/values-dev.yaml, not a replacement:
+#
+#   helm install alloy grafana/alloy --version 1.12.1 -n monitoring \
+#     -f observability/alloy/values-dev.yaml \
+#     -f runtime/local/values/alloy-values-local.yaml
+
+alloy:
+  mounts:
+    # Docker Desktop's Kubernetes runs its kubelet against the classic
+    # Docker Engine (not containerd) - `docker://28.5.1` per `kubectl get
+    # nodes -o wide`. Docker Engine writes container logs under
+    # /var/lib/docker/containers/<id>/<id>-json.log, and kubelet only
+    # SYMLINKS that into the standard /var/log/pods/<...>/0.log location
+    # for compatibility - the actual log content never lives under
+    # /var/log itself here. observability/alloy/README.md's own comment
+    # ("EKS uses containerd, which writes only under /var/log/pods")
+    # is correct for Phase 5/6's real target (a genuine containerd-based
+    # EKS node resolves those paths directly, no symlink indirection) -
+    # this local environment is exactly the exception that comment
+    # anticipated. Without this mount, Alloy's discovery.relabel-computed
+    # paths resolve to broken symlinks it can't follow
+    # ("error getting os stat ... no such file or directory"), and zero
+    # logs ever reach Loki. See docs/local-runtime-validation.md.
+    dockercontainers: true
+
+  # A full replacement of values-dev.yaml's configMap.content (Helm merges
+  # this scalar string key by full replacement, not by append/merge - see
+  # https://helm.sh/docs/chart_template_guide/values_files/ for why a
+  # plain string value from a later -f file always wins outright). Every
+  # component is IDENTICAL to values-dev.yaml's pipeline except one single
+  # line: `stage.cri {}` -> `stage.docker {}`, because Docker Engine's own
+  # json-file log driver wraps each line in a different envelope
+  # (`{"log":"...","stream":"stdout","time":"..."}`) than a containerd/CRI
+  # runtime does - the CRI-format parser silently fails to extract the
+  # real log line/timestamp from Docker-formatted log files. A real EKS
+  # node (containerd-based) needs `stage.cri`; this local, Docker-Desktop-
+  # only environment needs `stage.docker` instead. See
+  # docs/local-runtime-validation.md for the full diagnosis.
+  configMap:
+    create: true
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          regex         = sys.env("ALLOY_NODE_NAME")
+          action        = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // stage.docker (not stage.cri): this environment's runtime is
+      // Docker Engine, not containerd - see this file's own header
+      // comment.
+      loki.process "pod_logs" {
+        forward_to = [loki.write.default.receiver]
+
+        stage.docker {}
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+      }

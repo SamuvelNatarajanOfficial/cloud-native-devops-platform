@@ -1,0 +1,21 @@
+# Local runtime overlay for Loki - Phase 7. Layered ON TOP of
+# observability/loki/values-dev.yaml, not a replacement:
+#
+#   helm install loki grafana/loki --version 7.3.0 -n monitoring \
+#     -f observability/loki/values-dev.yaml \
+#     -f runtime/local/values/loki-values-local.yaml
+
+# The chart's memcached-based query-result/chunk caches are enabled by
+# default (resultsCache.allocatedMemory/chunksCache's own default: 1024Mi
+# each) - a real optimization for actual query load, not something a
+# small local demo with a handful of log lines benefits from. On this
+# project's single-node local cluster (shared with kube-prometheus-stack,
+# the TaskFlow app, and Alloy), that ~2Gi of extra memcached requests was
+# enough to leave these pods permanently Pending
+# ("FailedScheduling: Insufficient memory") - a genuine local-resource
+# constraint, not a Loki misconfiguration. Disabled here only; a real
+# EKS dev cluster (this project's actual Phase 5 target) would keep them.
+resultsCache:
+  enabled: false
+chunksCache:
+  enabled: false

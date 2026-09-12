@@ -9,7 +9,16 @@ RUN npm ci --omit=dev
 # --- Runtime stage: small alpine image, non-root user ---
 FROM node:20-alpine
 
-RUN addgroup -S app && adduser -S app -G app
+# Explicit numeric UID/GID (not just a named user): Kubernetes'
+# runAsNonRoot pod security check can only verify a container is non-root
+# statically, from the pod spec's runAsUser, when that UID is known ahead
+# of time - it cannot resolve a named user (e.g. "app") to a UID without
+# actually starting the container, so it refuses to start the container
+# at all rather than guess. helm/taskflow's securityContext.pod.runAsUser
+# (values.yaml) is set to this same 10001 - the two must stay in sync.
+# (1000 was tried first and rejected at build time: node:20-alpine
+# already has GID 1000 taken by its built-in "node" user.)
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 
 WORKDIR /app
 

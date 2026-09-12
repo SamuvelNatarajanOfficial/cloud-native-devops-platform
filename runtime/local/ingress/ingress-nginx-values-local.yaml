@@ -1,0 +1,36 @@
+# ingress-nginx values for LOCAL runtime validation only (Phase 7).
+#
+# This is NOT a replacement for the AWS Load Balancer Controller
+# (networking/aws-load-balancer-controller/) - it exists purely so the
+# same helm/taskflow Ingress resource can be tested end-to-end on a local
+# Kubernetes cluster, where there is no ALB to create one. See
+# docs/local-runtime-validation.md for the full local-vs-AWS architecture
+# distinction; docs/networking-architecture.md's own AWS design is
+# unchanged by this file.
+#
+# Chart: ingress-nginx/ingress-nginx, pinned version 4.15.1 (app v1.15.1) -
+# verified current via the controller's own GitHub Releases API at the
+# time this file was written.
+#
+# Deploy:
+#   helm install ingress-nginx ingress-nginx/ingress-nginx --version 4.15.1 \
+#     -n ingress-nginx --create-namespace \
+#     -f runtime/local/ingress/ingress-nginx-values-local.yaml
+
+controller:
+  replicaCount: 1
+
+  resources:
+    requests: { cpu: 50m, memory: 90Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+  # LoadBalancer (this chart's own default, not overridden here): Docker
+  # Desktop's Kubernetes has built-in support for mapping a LoadBalancer
+  # Service's external IP to localhost - no MetalLB or NodePort juggling
+  # needed for this local runtime path. On Kind (a CI runner, for
+  # example) this would instead need a NodePort + Kind's own
+  # extraPortMappings, or MetalLB - not needed here since Docker Desktop
+  # is this project's actual local runtime target (see
+  # docs/local-runtime-validation.md).
+  service:
+    type: LoadBalancer

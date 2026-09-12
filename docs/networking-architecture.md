@@ -286,7 +286,13 @@ Terraform (IRSA role), the Helm values, and the ArgoCD Application are all
 real and validated (`terraform validate`, `helm template`, `kubeconform`).
 Installing the controller, having it actually create an ALB, and
 confirming the ALB routes real traffic all require a real EKS cluster and
-were not performed - see the Phase 6 implementation summary.
+were not performed - see the Phase 6 implementation summary. **Phase 7
+runtime-validated the equivalent mechanism on a local cluster instead**
+(ingress-nginx in place of the AWS Load Balancer Controller, a
+self-signed certificate in place of ACM) - see
+[docs/local-runtime-validation.md](local-runtime-validation.md), whose
+own "AWS Runtime Limitations" section is explicit that this does not
+prove anything about the AWS-specific components themselves.
 
 ## Ingress
 
